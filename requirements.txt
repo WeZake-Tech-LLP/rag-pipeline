@@ -1,0 +1,15 @@
+llama-index
+llama-index-vector-stores-chroma
+llama-index-embeddings-huggingface
+llama-index-llms-groq
+chromadb
+sentence-transformers
+transformers
+torch
+streamlit
+requests
+beautifulsoup4
+youtube-transcript-api>=0.6.2
+python-dotenv
+groq
+yt-dlp
