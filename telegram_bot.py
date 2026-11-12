@@ -6,6 +6,9 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from ingest import ingest_url
+from query import query_knowledge_base
+
 load_dotenv()
 
 _URL_PATTERN = re.compile(r"https?://\S+")
@@ -59,3 +62,19 @@ def format_query_reply(result: dict) -> str:
     if sources:
         reply += "\n\nSources:\n" + "\n".join(f"- {s}" for s in sources)
     return reply
+
+
+def build_reply(text: str) -> str:
+    url = extract_first_url(text)
+    if url:
+        try:
+            result = ingest_url(url)
+        except Exception as e:
+            return f"❌ Error: {e}"
+        return format_ingest_reply(result)
+
+    try:
+        result = query_knowledge_base(text)
+    except Exception as e:
+        return f"❌ Error: {e}"
+    return format_query_reply(result)

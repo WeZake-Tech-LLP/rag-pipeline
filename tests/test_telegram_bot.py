@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from telegram_bot import (
     get_bot_token,
@@ -6,6 +8,7 @@ from telegram_bot import (
     is_authorized,
     format_ingest_reply,
     format_query_reply,
+    build_reply,
 )
 
 
@@ -89,3 +92,36 @@ def test_format_query_reply_no_sources():
 def test_format_query_reply_failure():
     result = {"success": False, "error": "Please enter a question."}
     assert "Please enter a question." in format_query_reply(result)
+
+
+def test_build_reply_ingests_when_url_present():
+    with patch("telegram_bot.ingest_url", return_value={"success": True, "duplicate": False, "chunks_stored": 3, "extraction_quality": "full_text", "url_type": "article"}) as mock_ingest:
+        reply = build_reply("here: https://example.com/post")
+    mock_ingest.assert_called_once_with("https://example.com/post")
+    assert "3" in reply
+
+
+def test_build_reply_queries_when_no_url():
+    with patch("telegram_bot.query_knowledge_base", return_value={"success": True, "answer": "It's about X.", "sources": []}) as mock_query:
+        reply = build_reply("what is this about?")
+    mock_query.assert_called_once_with("what is this about?")
+    assert "It's about X." in reply
+
+
+def test_build_reply_catches_exception_from_ingest():
+    with patch("telegram_bot.ingest_url", side_effect=RuntimeError("boom")):
+        reply = build_reply("https://example.com/post")
+    assert "boom" in reply
+
+
+def test_build_reply_catches_exception_from_query():
+    with patch("telegram_bot.query_knowledge_base", side_effect=RuntimeError("boom")):
+        reply = build_reply("a question with no link")
+    assert "boom" in reply
+
+
+def test_build_reply_empty_message_returns_friendly_error():
+    with patch("telegram_bot.query_knowledge_base", return_value={"success": False, "error": "Please enter a question."}) as mock_query:
+        reply = build_reply("   ")
+    mock_query.assert_called_once_with("   ")
+    assert "Please enter a question." in reply
