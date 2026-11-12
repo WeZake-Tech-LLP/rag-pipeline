@@ -5,6 +5,7 @@ import re
 from typing import Optional
 
 from dotenv import load_dotenv
+from telegram.ext import Application, MessageHandler, filters
 
 from ingest import ingest_url
 from query import query_knowledge_base
@@ -78,3 +79,28 @@ def build_reply(text: str) -> str:
     except Exception as e:
         return f"❌ Error: {e}"
     return format_query_reply(result)
+
+
+async def handle_message(update, context) -> None:
+    user_id = update.effective_user.id
+    text = update.message.text or ""
+
+    if not is_authorized(user_id, get_allowed_user_id()):
+        return
+
+    ack = "⏳ Processing..." if extract_first_url(text) else "⏳ Searching..."
+    await update.message.reply_text(ack)
+    await update.message.reply_text(build_reply(text))
+
+
+def main() -> None:
+    token = get_bot_token()
+    get_allowed_user_id()  # fail fast if misconfigured, before starting the bot
+
+    application = Application.builder().token(token).build()
+    application.add_handler(MessageHandler(filters.TEXT, handle_message))
+    application.run_polling()
+
+
+if __name__ == "__main__":
+    main()

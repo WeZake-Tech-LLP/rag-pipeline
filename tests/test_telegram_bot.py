@@ -1,4 +1,5 @@
-from unittest.mock import patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from telegram_bot import (
@@ -9,6 +10,7 @@ from telegram_bot import (
     format_ingest_reply,
     format_query_reply,
     build_reply,
+    handle_message,
 )
 
 
@@ -125,3 +127,28 @@ def test_build_reply_empty_message_returns_friendly_error():
         reply = build_reply("   ")
     mock_query.assert_called_once_with("   ")
     assert "Please enter a question." in reply
+
+
+def _make_update(user_id, text):
+    update = MagicMock()
+    update.effective_user.id = user_id
+    update.message.text = text
+    update.message.reply_text = AsyncMock()
+    return update
+
+
+def test_handle_message_ignores_unauthorized_sender():
+    update = _make_update(999, "https://example.com")
+    with patch("telegram_bot.get_allowed_user_id", return_value=111):
+        asyncio.run(handle_message(update, None))
+    update.message.reply_text.assert_not_called()
+
+
+def test_handle_message_replies_for_authorized_sender():
+    update = _make_update(111, "https://example.com")
+    with patch("telegram_bot.get_allowed_user_id", return_value=111), \
+         patch("telegram_bot.build_reply", return_value="done"):
+        asyncio.run(handle_message(update, None))
+    assert update.message.reply_text.call_count == 2  # ack, then final reply
+    final_call_text = update.message.reply_text.call_args_list[-1].args[0]
+    assert final_call_text == "done"
