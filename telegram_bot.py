@@ -37,3 +37,25 @@ def extract_first_url(text: str) -> Optional[str]:
 
 def is_authorized(user_id: int, allowed_id: int) -> bool:
     return user_id == allowed_id
+
+
+def format_ingest_reply(result: dict) -> str:
+    if result.get("success") and result.get("duplicate"):
+        return "⚠️ URL already exists in knowledge base"
+    if result.get("success"):
+        return (
+            f"✅ Added — {result.get('chunks_stored', 0)} chunks stored "
+            f"(type: {result.get('url_type', 'unknown')}, "
+            f"quality: {result.get('extraction_quality', 'unknown')})"
+        )
+    return f"❌ Failed: {result.get('message', 'Ingestion failed.')}"
+
+
+def format_query_reply(result: dict) -> str:
+    if not result.get("success"):
+        return result.get("error", "Query failed.")
+    reply = result.get("answer", "")
+    sources = result.get("sources") or result.get("source_urls") or []
+    if sources:
+        reply += "\n\nSources:\n" + "\n".join(f"- {s}" for s in sources)
+    return reply

@@ -1,5 +1,12 @@
 import pytest
-from telegram_bot import get_bot_token, get_allowed_user_id, extract_first_url, is_authorized
+from telegram_bot import (
+    get_bot_token,
+    get_allowed_user_id,
+    extract_first_url,
+    is_authorized,
+    format_ingest_reply,
+    format_query_reply,
+)
 
 
 def test_get_bot_token_missing_raises(monkeypatch):
@@ -49,3 +56,36 @@ def test_is_authorized_true_for_matching_id():
 
 def test_is_authorized_false_for_other_id():
     assert is_authorized(111, 222) is False
+
+
+def test_format_ingest_reply_success():
+    result = {"success": True, "duplicate": False, "chunks_stored": 6, "extraction_quality": "full_text", "url_type": "article"}
+    reply = format_ingest_reply(result)
+    assert "6" in reply and "article" in reply
+
+
+def test_format_ingest_reply_duplicate():
+    result = {"success": True, "duplicate": True, "message": "URL already exists in knowledge base"}
+    assert "already exists" in format_ingest_reply(result).lower()
+
+
+def test_format_ingest_reply_failure():
+    result = {"success": False, "duplicate": False, "message": "Could not extract content: boom"}
+    assert "boom" in format_ingest_reply(result)
+
+
+def test_format_query_reply_with_sources():
+    result = {"success": True, "answer": "It's about X.", "sources": ["https://example.com/a"]}
+    reply = format_query_reply(result)
+    assert "It's about X." in reply and "https://example.com/a" in reply
+
+
+def test_format_query_reply_no_sources():
+    result = {"success": True, "answer": "General knowledge answer.", "sources": []}
+    reply = format_query_reply(result)
+    assert "General knowledge answer." in reply
+
+
+def test_format_query_reply_failure():
+    result = {"success": False, "error": "Please enter a question."}
+    assert "Please enter a question." in format_query_reply(result)
