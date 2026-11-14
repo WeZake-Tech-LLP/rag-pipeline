@@ -8,8 +8,11 @@ def test_format_ingest_reply_success():
 
 
 def test_format_ingest_reply_duplicate():
-    result = {"success": True, "duplicate": True}
-    assert "already exists" in format_ingest_reply(result).lower()
+    # ingest_url() actually returns success=False for duplicates (see ingest.py:573-577)
+    result = {"success": False, "duplicate": True, "message": "URL already exists in knowledge base"}
+    reply = format_ingest_reply(result)
+    assert "already exists" in reply.lower()
+    assert "Failed" not in reply
 
 
 def test_format_ingest_reply_failure():

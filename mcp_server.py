@@ -4,7 +4,12 @@ import os
 
 from mcp.server.mcpserver import MCPServer
 
-from ingest import ingest_url, format_ingest_reply
+from ingest import (
+    ingest_url,
+    format_ingest_reply,
+    get_embed_model as ingest_get_embed_model,
+    get_collection as ingest_get_collection,
+)
 from query import (
     query_knowledge_base,
     format_query_reply,
@@ -32,6 +37,10 @@ def warmup_models() -> None:
     get_embed_model()
     get_reranker()
     get_groq_client()
+    # ingest.py keeps its own separate singletons from query.py's — both
+    # must be warmed, or the first real ingest call still cold-loads.
+    ingest_get_embed_model()
+    ingest_get_collection()
 
 
 server = MCPServer("rag-knowledge-base")

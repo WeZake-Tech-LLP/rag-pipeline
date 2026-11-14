@@ -644,7 +644,7 @@ def ingest_url(url: str) -> dict:
 
 
 def format_ingest_reply(result: dict) -> str:
-    if result.get("success") and result.get("duplicate"):
+    if result.get("duplicate"):
         return "⚠️ URL already exists in knowledge base"
     if result.get("success"):
         return (

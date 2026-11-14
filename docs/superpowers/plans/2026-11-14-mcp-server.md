@@ -14,9 +14,9 @@
 
 - `query_knowledge_base()`'s retrieval/generation **logic** stays unmodified — only its debug output destination changes (stdout → stderr).
 - Local stdio transport only — no remote/hosted server, no authentication (per spec: Claude Code only, confirmed).
-- Read-only: the tool only searches; no ingestion capability is exposed via MCP.
+- ~~Read-only: the tool only searches; no ingestion capability is exposed via MCP.~~ Superseded by Task 6: ingestion (`add_to_knowledge_base`) was added as an approved follow-up, reusing `ingest_url()` unmodified.
 - `mcp_server.py` must pin its own working directory to its own file's location before importing `query`, so `CHROMA_PATH = "./chroma_db"` resolves correctly regardless of where Claude Code was launched from.
-- `mcp_server.py` must eagerly warm up the embedding model, reranker, and Groq client at startup, before accepting any tool call.
+- `mcp_server.py` must eagerly warm up the embedding model, reranker, and Groq client at startup, before accepting any tool call — and, since `ingest.py` keeps its own separate singletons from `query.py`'s (found during final review), its embedding model and collection must be warmed too, or the first real ingest call still cold-loads.
 - New dependency `mcp>=2.0.0` added to `requirements.txt`.
 - Registration goes in `~/.claude.json`'s existing top-level `mcpServers` object, in the same `{"type": "stdio", "command": ..., "args": [...]}` shape as the existing `reddit-rss` entry — added alongside it, never overwriting the file wholesale.
 
@@ -303,3 +303,128 @@ In that same fresh session, make this the *first* tool call (no prior warmup fro
 git log --oneline -6
 ```
 Expected: shows all five tasks' commits in order, confirming the full feature is committed.
+
+---
+
+### Task 6: Add an ingestion tool (`add_to_knowledge_base`)
+
+Added after Task 5, by request — scope confirmed as a small addition
+reusing the exact pattern Tasks 3-4 already established, not a new
+design.
+
+**Files:**
+- Modify: `ingest.py` (add `format_ingest_reply`, moved from `telegram_bot.py:46-55`)
+- Modify: `telegram_bot.py:10-11` (remove local `format_ingest_reply`, import from `ingest` instead)
+- Modify: `mcp_server.py` (new impl function + new tool, added to the existing `server`)
+- Test: `tests/test_ingest.py` (new), `tests/test_mcp_server.py`
+
+**Interfaces:**
+- Consumes: `ingest_url` (from `ingest.py`, already imported into `mcp_server.py` is NOT yet the case — this task adds that import).
+- Produces: `ingest.format_ingest_reply(result: dict) -> str` (moved); `mcp_server.add_to_knowledge_base_impl(url: str) -> str`; the registered tool `add_to_knowledge_base`.
+
+- [ ] **Step 1: Write the failing tests for the moved formatter**
+
+```python
+# tests/test_ingest.py
+from ingest import format_ingest_reply
+
+def test_format_ingest_reply_success():
+    result = {"success": True, "duplicate": False, "chunks_stored": 6, "extraction_quality": "full_text", "url_type": "article"}
+    reply = format_ingest_reply(result)
+    assert "6" in reply and "article" in reply
+
+def test_format_ingest_reply_duplicate():
+    result = {"success": True, "duplicate": True}
+    assert "already exists" in format_ingest_reply(result).lower()
+
+def test_format_ingest_reply_failure():
+    result = {"success": False, "duplicate": False, "message": "Could not extract content: boom"}
+    assert "boom" in format_ingest_reply(result)
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `pytest tests/test_ingest.py -v`
+Expected: FAIL with `ImportError: cannot import name 'format_ingest_reply' from 'ingest'`
+
+- [ ] **Step 3: Move `format_ingest_reply` from `telegram_bot.py` into `ingest.py`**
+
+Copy the function body exactly as it exists at `telegram_bot.py:46-55` into `ingest.py` (place it near `ingest_url`). Remove it from `telegram_bot.py`. Change `telegram_bot.py`'s `from ingest import ingest_url` (line 10) to `from ingest import ingest_url, format_ingest_reply`.
+
+- [ ] **Step 4: Run to verify it passes, then run the full suite for regressions**
+
+Run: `pytest tests/test_ingest.py -v` — Expected: PASS (3 passed)
+Run: `pytest tests/ -v` — Expected: PASS (all tests, including `telegram_bot.py`'s pre-existing `test_format_ingest_reply_*` tests, which still pass via the re-exported import)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ingest.py telegram_bot.py tests/test_ingest.py
+git commit -m "refactor: move format_ingest_reply into ingest.py for reuse"
+```
+
+- [ ] **Step 6: Write the failing tests for the new MCP tool logic**
+
+```python
+# appended to tests/test_mcp_server.py
+from unittest.mock import patch
+from mcp_server import add_to_knowledge_base_impl
+
+def test_add_passes_url_through_and_formats_success():
+    with patch("mcp_server.ingest_url", return_value={"success": True, "duplicate": False, "chunks_stored": 4, "extraction_quality": "full_text", "url_type": "reddit"}) as mock_ingest:
+        result = add_to_knowledge_base_impl("https://example.com/post")
+    mock_ingest.assert_called_once_with("https://example.com/post")
+    assert "4" in result
+
+def test_add_handles_duplicate():
+    with patch("mcp_server.ingest_url", return_value={"success": True, "duplicate": True}):
+        result = add_to_knowledge_base_impl("https://example.com/post")
+    assert "already exists" in result.lower()
+
+def test_add_handles_failure():
+    with patch("mcp_server.ingest_url", return_value={"success": False, "duplicate": False, "message": "Could not extract content: boom"}):
+        result = add_to_knowledge_base_impl("https://example.com/post")
+    assert "boom" in result
+```
+
+- [ ] **Step 7: Run to verify they fail**
+
+Run: `pytest tests/test_mcp_server.py -v`
+Expected: FAIL with `ImportError: cannot import name 'add_to_knowledge_base_impl' from 'mcp_server'`
+
+- [ ] **Step 8: Implement `add_to_knowledge_base_impl` and the new tool in `mcp_server.py`**
+
+Add `from ingest import ingest_url, format_ingest_reply` to `mcp_server.py`'s imports. `add_to_knowledge_base_impl(url: str) -> str` calls `ingest_url(url)` and returns `format_ingest_reply(result)`. Register a second tool on the same `server` instance:
+
+```python
+@server.tool()
+def add_to_knowledge_base(url: str) -> str:
+    """Save a URL (YouTube, LinkedIn, Reddit, X/Twitter, Facebook,
+    Instagram, or a generic article) into this personal RAG knowledge
+    base, so it can be searched later via search_knowledge_base. Use
+    this when the user asks to save, add, or ingest a link — not for
+    a bare URL with no indication they want it stored.
+    """
+    return add_to_knowledge_base_impl(url)
+```
+
+- [ ] **Step 9: Run to verify they pass**
+
+Run: `pytest tests/test_mcp_server.py -v`
+Expected: PASS (9 passed)
+
+- [ ] **Step 10: Run the full suite and verify the module still compiles**
+
+Run: `pytest tests/ -v` — Expected: PASS (all tests)
+Run: `python -m py_compile mcp_server.py ingest.py telegram_bot.py` — Expected: no output, exit code 0
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add mcp_server.py tests/test_mcp_server.py
+git commit -m "feat: add ingestion tool to the MCP server"
+```
+
+- [ ] **Step 12: Manual verification**
+
+In the same fresh Claude Code session used for Task 5's verification (no server restart needed — Claude Code will relaunch the stdio process on its own next tool call, picking up the new code), ask something like *"add this to my knowledge base: <a real URL>"*. Expected: the tool is called, the URL is ingested, and a follow-up search for it succeeds.

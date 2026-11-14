@@ -26,9 +26,11 @@ about that content too.
 
 ## Non-goals (explicitly out of scope for this iteration)
 
-- **No ingestion via Claude.** The tool is read-only (search/ask). You
-  still add content via Streamlit or Telegram. This was confirmed as
-  the agreed default when scoping this feature.
+- ~~**No ingestion via Claude.**~~ **Superseded.** Search-only was the
+  agreed default when this feature was first scoped, but ingestion via
+  Claude Code was added as an approved follow-up (`add_to_knowledge_base`,
+  implementation plan Task 6) — same pattern as the search tool, reusing
+  `ingest_url()` unmodified. The tool set is no longer read-only.
 - **No Claude Desktop or claude.ai support.** Confirmed: Claude Code
   only. Claude Desktop uses a different config file/location and
   claude.ai would need a hosted remote server with OAuth — neither is
