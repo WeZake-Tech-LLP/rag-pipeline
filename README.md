@@ -101,6 +101,53 @@ Your browser should open to the local URL Streamlit prints (typically `http://lo
 
 ---
 
+## Telegram Bot (optional second entry point)
+
+Alongside the Streamlit UI, you can run a personal Telegram bot that lets
+you ingest links and ask questions directly from Telegram. It shares the
+same `./chroma_db` knowledge base as Streamlit — nothing needs to be kept
+in sync, they just read/write the same folder.
+
+### 1. Create a bot and get a token
+
+Message **@BotFather** on Telegram, send `/newbot`, and follow the
+prompts. It replies with a token in the form `<digits>:<secret>` —
+add it to `.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=123456789:your_token_here
+```
+
+### 2. Get your Telegram user ID
+
+Message **@userinfobot** on Telegram — it replies with your numeric user
+ID. Add it to `.env`:
+
+```env
+TELEGRAM_ALLOWED_USER_ID=your_numeric_id_here
+```
+
+Only messages from this user ID are processed; everyone else is
+silently ignored.
+
+### 3. Run the bot
+
+```bash
+source .venv/bin/activate
+python telegram_bot.py
+```
+
+It runs continuously (like Streamlit) — leave it running, or run it
+alongside `streamlit run app.py` in a separate terminal.
+
+### 4. Use it
+
+- Send a URL (YouTube, LinkedIn, Reddit, or an article link) to ingest it.
+- Send any other text to ask a question against the knowledge base.
+- Only URLs are supported for ingestion — raw pasted text isn't yet.
+
+---
+
 ## Project Layout
 
 ```
