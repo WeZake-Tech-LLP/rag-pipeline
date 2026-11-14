@@ -1,6 +1,11 @@
 from unittest.mock import patch, call
 
-from mcp_server import search_knowledge_base_impl, pin_working_directory, warmup_models
+from mcp_server import (
+    search_knowledge_base_impl,
+    pin_working_directory,
+    warmup_models,
+    add_to_knowledge_base_impl,
+)
 
 
 def test_search_passes_question_and_filters_through():
@@ -43,3 +48,22 @@ def test_warmup_models_loads_all_three():
     mock_embed.assert_called_once()
     mock_reranker.assert_called_once()
     mock_groq.assert_called_once()
+
+
+def test_add_passes_url_through_and_formats_success():
+    with patch("mcp_server.ingest_url", return_value={"success": True, "duplicate": False, "chunks_stored": 4, "extraction_quality": "full_text", "url_type": "reddit"}) as mock_ingest:
+        result = add_to_knowledge_base_impl("https://example.com/post")
+    mock_ingest.assert_called_once_with("https://example.com/post")
+    assert "4" in result
+
+
+def test_add_handles_duplicate():
+    with patch("mcp_server.ingest_url", return_value={"success": True, "duplicate": True}):
+        result = add_to_knowledge_base_impl("https://example.com/post")
+    assert "already exists" in result.lower()
+
+
+def test_add_handles_failure():
+    with patch("mcp_server.ingest_url", return_value={"success": False, "duplicate": False, "message": "Could not extract content: boom"}):
+        result = add_to_knowledge_base_impl("https://example.com/post")
+    assert "boom" in result
