@@ -7,7 +7,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from telegram.ext import Application, MessageHandler, filters
 
-from ingest import ingest_url
+from ingest import ingest_url, format_ingest_reply
 from query import query_knowledge_base, format_query_reply
 
 load_dotenv()
@@ -43,16 +43,6 @@ def is_authorized(user_id: int, allowed_id: int) -> bool:
     return user_id == allowed_id
 
 
-def format_ingest_reply(result: dict) -> str:
-    if result.get("success") and result.get("duplicate"):
-        return "⚠️ URL already exists in knowledge base"
-    if result.get("success"):
-        return (
-            f"✅ Added — {result.get('chunks_stored', 0)} chunks stored "
-            f"(type: {result.get('url_type', 'unknown')}, "
-            f"quality: {result.get('extraction_quality', 'unknown')})"
-        )
-    return f"❌ Failed: {result.get('message', 'Ingestion failed.')}"
 
 
 def build_reply(text: str) -> str:

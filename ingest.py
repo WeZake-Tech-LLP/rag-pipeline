@@ -643,6 +643,18 @@ def ingest_url(url: str) -> dict:
     }
 
 
+def format_ingest_reply(result: dict) -> str:
+    if result.get("success") and result.get("duplicate"):
+        return "⚠️ URL already exists in knowledge base"
+    if result.get("success"):
+        return (
+            f"✅ Added — {result.get('chunks_stored', 0)} chunks stored "
+            f"(type: {result.get('url_type', 'unknown')}, "
+            f"quality: {result.get('extraction_quality', 'unknown')})"
+        )
+    return f"❌ Failed: {result.get('message', 'Ingestion failed.')}"
+
+
 def list_ingested_sources() -> list:
     collection = get_collection()
     if collection.count() == 0:
