@@ -16,6 +16,14 @@ def _icon_for_type(source_type: str) -> str:
         return "🎥"
     if source_type == "linkedin":
         return "💼"
+    if source_type == "reddit":
+        return "👽"
+    if source_type == "x":
+        return "🐦"
+    if source_type == "facebook":
+        return "📘"
+    if source_type == "instagram":
+        return "📷"
     return "📄"
 
 
@@ -30,6 +38,10 @@ def _normalize_filter_type(ui_value: str) -> Optional[str]:
         "All": None,
         "YouTube": "youtube",
         "LinkedIn": "linkedin",
+        "Reddit": "reddit",
+        "X": "x",
+        "Facebook": "facebook",
+        "Instagram": "instagram",
         "Article": "article",
     }
     return mapping.get(ui_value)
@@ -82,7 +94,7 @@ st.title("Ask Your Knowledge Base")
 question = st.text_area("Ask a question...", height=140, placeholder="What does this source say about ...?")
 
 with st.expander("Advanced Filters (optional)"):
-    ui_filter_type = st.selectbox("Filter by type", ["All", "YouTube", "LinkedIn", "Article"])
+    ui_filter_type = st.selectbox("Filter by type", ["All", "YouTube", "LinkedIn", "Reddit", "X", "Facebook", "Instagram", "Article"])
     filter_url = st.text_input("Filter by exact URL (optional)", placeholder="https://...")
 
 if knowledge_base_is_empty():
