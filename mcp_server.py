@@ -1,8 +1,53 @@
 """MCP server: a third entry point into the same RAG knowledge base."""
 
-from query import query_knowledge_base, format_query_reply
+import os
+
+from mcp.server.mcpserver import MCPServer
+
+from query import (
+    query_knowledge_base,
+    format_query_reply,
+    get_embed_model,
+    get_reranker,
+    get_groq_client,
+)
 
 
 def search_knowledge_base_impl(question: str, filter_type: str = None, filter_url: str = None) -> str:
     result = query_knowledge_base(question, filter_type=filter_type, filter_url=filter_url)
     return format_query_reply(result)
+
+
+def pin_working_directory() -> None:
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def warmup_models() -> None:
+    get_embed_model()
+    get_reranker()
+    get_groq_client()
+
+
+server = MCPServer("rag-knowledge-base")
+
+
+@server.tool()
+def search_knowledge_base(question: str, filter_type: str = "", filter_url: str = "") -> str:
+    """Search this personal RAG knowledge base (YouTube, LinkedIn, Reddit,
+    X/Twitter, Facebook, Instagram, and article content the user has
+    ingested) and answer a question grounded in it.
+
+    filter_type: optional, one of youtube/linkedin/reddit/x/facebook/instagram/article
+    filter_url: optional, an exact source URL already in the knowledge base
+    """
+    return search_knowledge_base_impl(question, filter_type or None, filter_url or None)
+
+
+def main() -> None:
+    pin_working_directory()
+    warmup_models()
+    server.run()
+
+
+if __name__ == "__main__":
+    main()

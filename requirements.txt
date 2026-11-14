@@ -15,3 +15,4 @@ groq
 yt-dlp
 python-telegram-bot
 pytest
+mcp>=2.0.0
