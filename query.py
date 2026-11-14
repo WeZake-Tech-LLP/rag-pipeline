@@ -9,11 +9,44 @@ load_dotenv()
 CHROMA_PATH = "./chroma_db"
 COLLECTION_NAME = "knowledge_base"
 EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+RERANKER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+INITIAL_RETRIEVAL_COUNT = 15
+FINAL_CONTEXT_COUNT = 6
+
+_collection = None
+_embed_model = None
+_reranker = None
+_groq_client = None
 
 
 def get_collection():
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    return client.get_or_create_collection(COLLECTION_NAME)
+    global _collection
+    if _collection is None:
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        _collection = client.get_or_create_collection(COLLECTION_NAME)
+    return _collection
+
+
+def get_embed_model():
+    global _embed_model
+    if _embed_model is None:
+        _embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
+    return _embed_model
+
+
+def get_reranker():
+    global _reranker
+    if _reranker is None:
+        from sentence_transformers import CrossEncoder
+        _reranker = CrossEncoder(RERANKER_MODEL_NAME)
+    return _reranker
+
+
+def get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    return _groq_client
 
 
 def expand_query(question: str) -> str:
@@ -59,14 +92,14 @@ def query_rag(question: str, filter_type: str = None, filter_url: str = None) ->
         where = {"source": {"$eq": filter_url.strip()}}
 
     # Embed the question
-    embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
+    embed_model = get_embed_model()
     expanded_q = expand_query(question)
     query_embedding = embed_model.get_text_embedding(expanded_q)
 
     # Query ChromaDB directly
     query_params = {
         "query_embeddings": [query_embedding],
-        "n_results": min(15, collection.count()),
+        "n_results": min(INITIAL_RETRIEVAL_COUNT, collection.count()),
         "include": ["documents", "metadatas", "distances"],
     }
     if where:
@@ -87,23 +120,23 @@ def query_rag(question: str, filter_type: str = None, filter_url: str = None) ->
         print(f"[DEBUG] Chunk {i+1} | Score: {score} | Source: {meta.get('source','?')}")
         print(f"[DEBUG] Preview: {doc[:100]}...")
 
-    # ── PHASE 2: RERANKING ──────────────────────────────────────────
-    # Uncomment this block to enable cross-encoder reranking
-    # pip install sentence-transformers
-    #
-    # from sentence_transformers import CrossEncoder
-    # reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-    #
-    # pairs = [[question, doc] for doc in documents]
-    # rerank_scores = reranker.predict(pairs)
-    #
-    # reranked = sorted(
-    #     zip(rerank_scores, documents, metadatas),
-    #     key=lambda x: x[0],
-    #     reverse=True
-    # )
-    # rerank_scores, documents, metadatas = zip(*reranked)
-    # print(f"[DEBUG] Reranked top score: {rerank_scores[0]:.4f}")
+    # ── RERANKING ────────────────────────────────────────────────────
+    # Retrieval above casts a wide net (INITIAL_RETRIEVAL_COUNT); the
+    # cross-encoder reranks by actual relevance to the question, and we
+    # keep only the top FINAL_CONTEXT_COUNT for the LLM's context.
+    if documents:
+        reranker = get_reranker()
+        pairs = [[question, doc] for doc in documents]
+        rerank_scores = reranker.predict(pairs)
+
+        reranked = sorted(
+            zip(rerank_scores, documents, metadatas, scores),
+            key=lambda x: x[0],
+            reverse=True,
+        )[:FINAL_CONTEXT_COUNT]
+
+        rerank_scores, documents, metadatas, scores = (list(x) for x in zip(*reranked))
+        print(f"[DEBUG] Reranked top score: {rerank_scores[0]:.4f}")
     # ────────────────────────────────────────────────────────────────
 
     # Build context string
@@ -120,7 +153,7 @@ def query_rag(question: str, filter_type: str = None, filter_url: str = None) ->
         context_str = "No relevant content found in knowledge base."
 
     # Call Groq directly
-    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    client = get_groq_client()
 
     system_prompt = """You are a precise knowledge-base assistant.
 
@@ -165,13 +198,13 @@ Never include raw links, author social handles, or metadata
 found inside the ingested content."""
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {question}"},
         ],
         temperature=0.3,
-        max_tokens=1500,
+        max_tokens=800,
     )
 
     answer = response.choices[0].message.content or ""
