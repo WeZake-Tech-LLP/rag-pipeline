@@ -237,6 +237,16 @@ found inside the ingested content."""
     }
 
 
+def format_query_reply(result: dict) -> str:
+    if not result.get("success"):
+        return result.get("error", "Query failed.")
+    reply = result.get("answer", "")
+    sources = result.get("sources") or result.get("source_urls") or []
+    if sources:
+        reply += "\n\nSources:\n" + "\n".join(f"- {s}" for s in sources)
+    return reply
+
+
 def knowledge_base_is_empty() -> bool:
     return get_collection().count() == 0
 

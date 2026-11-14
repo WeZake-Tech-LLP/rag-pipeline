@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from telegram.ext import Application, MessageHandler, filters
 
 from ingest import ingest_url
-from query import query_knowledge_base
+from query import query_knowledge_base, format_query_reply
 
 load_dotenv()
 
@@ -53,16 +53,6 @@ def format_ingest_reply(result: dict) -> str:
             f"quality: {result.get('extraction_quality', 'unknown')})"
         )
     return f"❌ Failed: {result.get('message', 'Ingestion failed.')}"
-
-
-def format_query_reply(result: dict) -> str:
-    if not result.get("success"):
-        return result.get("error", "Query failed.")
-    reply = result.get("answer", "")
-    sources = result.get("sources") or result.get("source_urls") or []
-    if sources:
-        reply += "\n\nSources:\n" + "\n".join(f"- {s}" for s in sources)
-    return reply
 
 
 def build_reply(text: str) -> str:
