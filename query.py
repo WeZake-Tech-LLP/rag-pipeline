@@ -1,4 +1,5 @@
 import os
+import sys
 from dotenv import load_dotenv
 import chromadb
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -47,6 +48,10 @@ def get_groq_client():
     if _groq_client is None:
         _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     return _groq_client
+
+
+def _debug_log(message: str) -> None:
+    print(message, file=sys.stderr)
 
 
 def expand_query(question: str) -> str:
@@ -115,10 +120,10 @@ def query_rag(question: str, filter_type: str = None, filter_url: str = None) ->
     scores = [round(1 / (1 + d), 4) for d in distances]
 
     # Debug logging
-    print(f"[DEBUG] Total chunks retrieved: {len(documents)}")
+    _debug_log(f"[DEBUG] Total chunks retrieved: {len(documents)}")
     for i, (doc, meta, score) in enumerate(zip(documents, metadatas, scores)):
-        print(f"[DEBUG] Chunk {i+1} | Score: {score} | Source: {meta.get('source','?')}")
-        print(f"[DEBUG] Preview: {doc[:100]}...")
+        _debug_log(f"[DEBUG] Chunk {i+1} | Score: {score} | Source: {meta.get('source','?')}")
+        _debug_log(f"[DEBUG] Preview: {doc[:100]}...")
 
     # ── RERANKING ────────────────────────────────────────────────────
     # Retrieval above casts a wide net (INITIAL_RETRIEVAL_COUNT); the
@@ -136,7 +141,7 @@ def query_rag(question: str, filter_type: str = None, filter_url: str = None) ->
         )[:FINAL_CONTEXT_COUNT]
 
         rerank_scores, documents, metadatas, scores = (list(x) for x in zip(*reranked))
-        print(f"[DEBUG] Reranked top score: {rerank_scores[0]:.4f}")
+        _debug_log(f"[DEBUG] Reranked top score: {rerank_scores[0]:.4f}")
     # ────────────────────────────────────────────────────────────────
 
     # Build context string

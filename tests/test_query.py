@@ -10,3 +10,11 @@ def test_format_query_reply_with_sources():
 def test_format_query_reply_failure():
     result = {"success": False, "error": "Please enter a question."}
     assert "Please enter a question." in format_query_reply(result)
+
+
+def test_debug_log_writes_to_stderr_not_stdout(capsys):
+    from query import _debug_log
+    _debug_log("[DEBUG] test message")
+    captured = capsys.readouterr()
+    assert "[DEBUG] test message" in captured.err
+    assert "[DEBUG] test message" not in captured.out
