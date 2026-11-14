@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 chroma_db/
 .vscode/
+.venv/
+.agents/
+.claude/
+.pytest_cache/
