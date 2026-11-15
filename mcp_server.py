@@ -1,30 +1,27 @@
 """MCP server: a third entry point into the same RAG knowledge base."""
 
 import os
+import threading
 
 from mcp.server.mcpserver import MCPServer
 
-from ingest import (
-    ingest_url,
-    format_ingest_reply,
-    get_embed_model as ingest_get_embed_model,
-    get_collection as ingest_get_collection,
-)
-from query import (
-    query_knowledge_base,
-    format_query_reply,
-    get_embed_model,
-    get_reranker,
-    get_groq_client,
-)
+# `ingest`/`query` are imported lazily, inside each function, rather than
+# at module level: they transitively pull in torch/transformers/chromadb
+# just by being imported, which takes ~20s on its own — before any model
+# is actually instantiated. Importing them here would delay server.run()
+# (and the MCP client's connection handshake) by that same ~20s, even
+# with warmup already backgrounded. Deferring the import moves that cost
+# to first real use, the same place warmup's own cost already lives.
 
 
 def search_knowledge_base_impl(question: str, filter_type: str = None, filter_url: str = None) -> str:
+    from query import query_knowledge_base, format_query_reply
     result = query_knowledge_base(question, filter_type=filter_type, filter_url=filter_url)
     return format_query_reply(result)
 
 
 def add_to_knowledge_base_impl(url: str) -> str:
+    from ingest import ingest_url, format_ingest_reply
     result = ingest_url(url)
     return format_ingest_reply(result)
 
@@ -34,11 +31,14 @@ def pin_working_directory() -> None:
 
 
 def warmup_models() -> None:
+    from query import get_embed_model, get_reranker, get_groq_client
+    # ingest.py keeps its own separate singletons from query.py's — both
+    # must be warmed, or the first real ingest call still cold-loads.
+    from ingest import get_embed_model as ingest_get_embed_model, get_collection as ingest_get_collection
+
     get_embed_model()
     get_reranker()
     get_groq_client()
-    # ingest.py keeps its own separate singletons from query.py's — both
-    # must be warmed, or the first real ingest call still cold-loads.
     ingest_get_embed_model()
     ingest_get_collection()
 
@@ -71,7 +71,11 @@ def add_to_knowledge_base(url: str) -> str:
 
 def main() -> None:
     pin_working_directory()
-    warmup_models()
+    # Run in the background: warmup takes ~30s (torch/transformers/
+    # reranker/Groq client), and if server.run() waited for it, the
+    # MCP client's connection handshake would time out before the
+    # server even started listening.
+    threading.Thread(target=warmup_models, daemon=True).start()
     server.run()
 
 

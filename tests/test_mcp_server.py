@@ -9,27 +9,27 @@ from mcp_server import (
 
 
 def test_search_passes_question_and_filters_through():
-    with patch("mcp_server.query_knowledge_base", return_value={"success": True, "answer": "It's about X.", "sources": []}) as mock_query:
+    with patch("query.query_knowledge_base", return_value={"success": True, "answer": "It's about X.", "sources": []}) as mock_query:
         result = search_knowledge_base_impl("what is this about?", filter_type="reddit", filter_url="https://example.com")
     mock_query.assert_called_once_with("what is this about?", filter_type="reddit", filter_url="https://example.com")
     assert "It's about X." in result
 
 
 def test_search_handles_empty_question():
-    with patch("mcp_server.query_knowledge_base", return_value={"success": False, "error": "Please enter a question."}) as mock_query:
+    with patch("query.query_knowledge_base", return_value={"success": False, "error": "Please enter a question."}) as mock_query:
         result = search_knowledge_base_impl("")
     mock_query.assert_called_once_with("", filter_type=None, filter_url=None)
     assert "Please enter a question." in result
 
 
 def test_search_handles_empty_knowledge_base():
-    with patch("mcp_server.query_knowledge_base", return_value={"success": True, "answer": "Knowledge base is empty. Please add some URLs first.", "sources": []}):
+    with patch("query.query_knowledge_base", return_value={"success": True, "answer": "Knowledge base is empty. Please add some URLs first.", "sources": []}):
         result = search_knowledge_base_impl("anything")
     assert "Knowledge base is empty" in result
 
 
 def test_search_handles_no_filter_match_gracefully():
-    with patch("mcp_server.query_knowledge_base", return_value={"success": True, "answer": "Not found in knowledge base.", "sources": []}):
+    with patch("query.query_knowledge_base", return_value={"success": True, "answer": "Not found in knowledge base.", "sources": []}):
         result = search_knowledge_base_impl("x", filter_type="youtube", filter_url="https://nonexistent.example")
     assert "Not found in knowledge base." in result
 
@@ -43,22 +43,32 @@ def test_pin_working_directory_chdirs_to_script_location():
     mock_chdir.assert_called_once_with(expected)
 
 
-def test_main_calls_pin_then_warmup_then_run_in_order():
+def test_main_pins_cwd_then_runs_without_waiting_for_warmup():
+    # warmup_models() takes ~30s (loads torch/transformers/reranker/Groq
+    # client); if main() waited for it before server.run(), the MCP
+    # client's connection handshake would time out before the server
+    # even starts listening. Warmup must run in a background thread so
+    # server.run() is reached immediately.
     import mcp_server
     manager = MagicMock()
     with patch("mcp_server.pin_working_directory", manager.pin), \
-         patch("mcp_server.warmup_models", manager.warmup), \
+         patch("mcp_server.threading.Thread") as mock_thread_cls, \
          patch.object(mcp_server.server, "run", manager.run):
+        mock_thread_instance = MagicMock()
+        mock_thread_cls.return_value = mock_thread_instance
         mcp_server.main()
-    assert manager.mock_calls == [call.pin(), call.warmup(), call.run()]
+    manager.pin.assert_called_once()
+    mock_thread_cls.assert_called_once_with(target=mcp_server.warmup_models, daemon=True)
+    mock_thread_instance.start.assert_called_once()
+    manager.run.assert_called_once()
 
 
 def test_warmup_models_loads_all_three():
-    with patch("mcp_server.get_embed_model") as mock_embed, \
-         patch("mcp_server.get_reranker") as mock_reranker, \
-         patch("mcp_server.get_groq_client") as mock_groq, \
-         patch("mcp_server.ingest_get_embed_model") as mock_ingest_embed, \
-         patch("mcp_server.ingest_get_collection") as mock_ingest_collection:
+    with patch("query.get_embed_model") as mock_embed, \
+         patch("query.get_reranker") as mock_reranker, \
+         patch("query.get_groq_client") as mock_groq, \
+         patch("ingest.get_embed_model") as mock_ingest_embed, \
+         patch("ingest.get_collection") as mock_ingest_collection:
         warmup_models()
     mock_embed.assert_called_once()
     mock_reranker.assert_called_once()
@@ -70,7 +80,7 @@ def test_warmup_models_loads_all_three():
 
 
 def test_add_passes_url_through_and_formats_success():
-    with patch("mcp_server.ingest_url", return_value={"success": True, "duplicate": False, "chunks_stored": 4, "extraction_quality": "full_text", "url_type": "reddit"}) as mock_ingest:
+    with patch("ingest.ingest_url", return_value={"success": True, "duplicate": False, "chunks_stored": 4, "extraction_quality": "full_text", "url_type": "reddit"}) as mock_ingest:
         result = add_to_knowledge_base_impl("https://example.com/post")
     mock_ingest.assert_called_once_with("https://example.com/post")
     assert "4" in result
@@ -78,13 +88,13 @@ def test_add_passes_url_through_and_formats_success():
 
 def test_add_handles_duplicate():
     # ingest_url() actually returns success=False for duplicates (see ingest.py:573-577)
-    with patch("mcp_server.ingest_url", return_value={"success": False, "duplicate": True, "message": "URL already exists in knowledge base"}):
+    with patch("ingest.ingest_url", return_value={"success": False, "duplicate": True, "message": "URL already exists in knowledge base"}):
         result = add_to_knowledge_base_impl("https://example.com/post")
     assert "already exists" in result.lower()
     assert "Failed" not in result
 
 
 def test_add_handles_failure():
-    with patch("mcp_server.ingest_url", return_value={"success": False, "duplicate": False, "message": "Could not extract content: boom"}):
+    with patch("ingest.ingest_url", return_value={"success": False, "duplicate": False, "message": "Could not extract content: boom"}):
         result = add_to_knowledge_base_impl("https://example.com/post")
     assert "boom" in result
