@@ -146,6 +146,29 @@ alongside `streamlit run app.py` in a separate terminal.
 - Send any other text to ask a question against the knowledge base.
 - Only URLs are supported for ingestion — raw pasted text isn't yet.
 
+### 5. Invite other people (optional)
+
+To let someone else use the bot without collecting their Telegram ID
+yourself, pick a secret invite phrase and add it to `.env`:
+
+```env
+TELEGRAM_INVITE_CODE=your_secret_phrase_here
+```
+
+Then share this link with them (replace `<BotUsername>` with your
+bot's actual username, and `<your_secret_phrase_here>` with the code
+above):
+
+```
+https://t.me/<BotUsername>?start=<your_secret_phrase_here>
+```
+
+When they open that link and tap "Start," Telegram sends the code to
+the bot automatically — no typing, no ID collection. They're approved
+from then on, and share the same knowledge base as the owner. Treat
+that link like any shared secret link: anyone who has it can join, so
+only send it to people you intend to invite.
+
 ---
 
 ## Project Layout
