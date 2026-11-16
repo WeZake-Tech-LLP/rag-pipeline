@@ -7,3 +7,4 @@ chroma_db/
 .agents/
 .claude/
 .pytest_cache/
+telegram_approved_users.json

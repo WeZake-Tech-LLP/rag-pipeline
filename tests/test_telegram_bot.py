@@ -152,3 +152,29 @@ def test_handle_message_replies_for_authorized_sender():
     assert update.message.reply_text.call_count == 2  # ack, then final reply
     final_call_text = update.message.reply_text.call_args_list[-1].args[0]
     assert final_call_text == "done"
+
+
+def test_get_invite_code_missing_raises(monkeypatch):
+    from telegram_bot import get_invite_code
+    monkeypatch.delenv("TELEGRAM_INVITE_CODE", raising=False)
+    with pytest.raises(RuntimeError):
+        get_invite_code()
+
+
+def test_get_invite_code_present(monkeypatch):
+    from telegram_bot import get_invite_code
+    monkeypatch.setenv("TELEGRAM_INVITE_CODE", "secret123")
+    assert get_invite_code() == "secret123"
+
+
+def test_load_approved_users_missing_file_returns_empty_set(tmp_path, monkeypatch):
+    import telegram_bot
+    monkeypatch.setattr(telegram_bot, "APPROVED_USERS_PATH", str(tmp_path / "approved.json"))
+    assert telegram_bot.load_approved_users() == set()
+
+
+def test_save_then_load_approved_users_round_trips(tmp_path, monkeypatch):
+    import telegram_bot
+    monkeypatch.setattr(telegram_bot, "APPROVED_USERS_PATH", str(tmp_path / "approved.json"))
+    telegram_bot.save_approved_users({111, 222})
+    assert telegram_bot.load_approved_users() == {111, 222}

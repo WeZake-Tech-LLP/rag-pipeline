@@ -1,5 +1,6 @@
 """Telegram bot: a second entry point into the same RAG knowledge base."""
 
+import json
 import os
 import re
 from typing import Optional
@@ -13,6 +14,7 @@ from query import query_knowledge_base, format_query_reply
 load_dotenv()
 
 _URL_PATTERN = re.compile(r"https?://\S+")
+APPROVED_USERS_PATH = "telegram_approved_users.json"
 
 
 def get_bot_token() -> str:
@@ -20,6 +22,25 @@ def get_bot_token() -> str:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in .env")
     return token
+
+
+def get_invite_code() -> str:
+    code = os.getenv("TELEGRAM_INVITE_CODE", "").strip()
+    if not code:
+        raise RuntimeError("TELEGRAM_INVITE_CODE is not set in .env")
+    return code
+
+
+def load_approved_users() -> set:
+    if not os.path.exists(APPROVED_USERS_PATH):
+        return set()
+    with open(APPROVED_USERS_PATH) as f:
+        return set(json.load(f))
+
+
+def save_approved_users(users: set) -> None:
+    with open(APPROVED_USERS_PATH, "w") as f:
+        json.dump(sorted(users), f)
 
 
 def get_allowed_user_id() -> int:
