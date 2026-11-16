@@ -4,7 +4,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 import requests
@@ -416,6 +416,20 @@ def _find_external_url(text: str) -> Optional[str]:
         if "reddit.com" not in candidate and "redd.it" not in candidate:
             return candidate
     return None
+
+
+def _find_platform_urls(text: str, max_links: int = 4) -> List[str]:
+    found = []
+    for match in re.finditer(r"https?://\S+", text):
+        candidate = match.group(0).rstrip(").,;:!?\"'][}{")
+        if candidate in found:
+            continue
+        if detect_url_type(candidate) == "article":
+            continue
+        found.append(candidate)
+        if len(found) >= max_links:
+            break
+    return found
 
 
 def extract_reddit(url: str, follow_links: bool = True):
