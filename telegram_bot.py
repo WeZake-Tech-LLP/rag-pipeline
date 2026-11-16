@@ -162,7 +162,19 @@ def main() -> None:
     get_allowed_user_id()  # fail fast if misconfigured, before starting the bot
 
     application = Application.builder().token(token).build()
-    application.add_handler(MessageHandler(filters.TEXT, handle_message))
+    application.add_handler(
+        MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, handle_message)
+    )
+
+    group_chat_id = get_group_chat_id()
+    if group_chat_id is not None:
+        application.add_handler(
+            MessageHandler(
+                filters.TEXT & filters.Chat(chat_id=group_chat_id),
+                handle_group_message,
+            )
+        )
+
     application.run_polling()
 
 

@@ -169,6 +169,38 @@ from then on, and share the same knowledge base as the owner. Treat
 that link like any shared secret link: anyone who has it can join, so
 only send it to people you intend to invite.
 
+### 6. Ingest links from a group (optional)
+
+The bot can also watch one Telegram group: anyone in that group can
+drop a link and it gets ingested automatically, with a short
+confirmation reply. Everything else in the group — questions, regular
+chat — is ignored completely; there's no Q&A in group context, only in
+DMs.
+
+1. **Add the bot to the group** like any other member.
+2. **Disable the bot's privacy mode.** By default, bots only see
+   messages that mention them. Message **@BotFather**, send
+   `/mypbots`, pick your bot, go to **Bot Settings → Group Privacy**,
+   and turn privacy **off**. Without this, the bot can't see plain
+   links posted in the group.
+3. **Find the group's numeric chat ID.** Send any message in the
+   group, then visit
+   `https://api.telegram.org/bot<your_token_here>/getUpdates` in a
+   browser and look for `"chat":{"id": ...}` in the response. Group
+   chat IDs are negative numbers.
+4. **Add it to `.env`:**
+
+   ```env
+   TELEGRAM_GROUP_CHAT_ID=your_negative_group_chat_id_here
+   ```
+
+5. **Restart the bot.** From then on, any link posted in that group is
+   ingested into the same shared knowledge base as DMs and the
+   Streamlit UI; non-link messages get no reply at all.
+
+If `TELEGRAM_GROUP_CHAT_ID` is left unset, this feature is simply off
+and the bot behaves exactly as it does today.
+
 ---
 
 ## Project Layout
