@@ -591,6 +591,15 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
     return text, quality, error, chunk_size, chunk_overlap
 
 
+def _append_linked_content(text: str, max_links: int = 4) -> str:
+    result = text
+    for url in _find_platform_urls(text, max_links=max_links):
+        content = _fetch_linked_content(url)
+        if content:
+            result += f"\n\nLinked Content: {url}\n{content}"
+    return result
+
+
 def _fetch_linked_content(url: str):
     """Fetch a URL found inside a post, using the right extractor for
     whatever it turns out to be, instead of always treating it as a

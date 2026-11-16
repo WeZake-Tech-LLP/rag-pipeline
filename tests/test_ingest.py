@@ -1,4 +1,5 @@
-from ingest import format_ingest_reply, _find_platform_urls
+from unittest.mock import patch
+from ingest import format_ingest_reply, _find_platform_urls, _append_linked_content
 
 
 def test_format_ingest_reply_success():
@@ -60,3 +61,37 @@ def test_find_platform_urls_respects_custom_max_links():
     text = "https://github.com/a/a https://github.com/b/b https://github.com/c/c"
     result = _find_platform_urls(text, max_links=2)
     assert result == ["https://github.com/a/a", "https://github.com/b/b"]
+
+
+def test_append_linked_content_adds_section_per_url():
+    text = "Article body mentions https://github.com/pallets/flask."
+    with patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        result = _append_linked_content(text)
+    mock_fetch.assert_called_once_with("https://github.com/pallets/flask")
+    assert text in result
+    assert "Linked Content: https://github.com/pallets/flask" in result
+    assert "Flask README text" in result
+
+
+def test_append_linked_content_returns_text_unchanged_when_no_platform_links():
+    text = "Just a plain article with https://example.com/related in it."
+    with patch("ingest._fetch_linked_content") as mock_fetch:
+        result = _append_linked_content(text)
+    mock_fetch.assert_not_called()
+    assert result == text
+
+
+def test_append_linked_content_skips_section_when_fetch_returns_none():
+    text = "A share-button link: https://twitter.com/intent/tweet?text=hi"
+    with patch("ingest._fetch_linked_content", return_value=None) as mock_fetch:
+        result = _append_linked_content(text)
+    mock_fetch.assert_called_once()
+    assert result == text
+
+
+def test_append_linked_content_adds_one_section_per_distinct_url():
+    text = "See https://github.com/a/a and https://github.com/b/b"
+    with patch("ingest._fetch_linked_content", side_effect=["A content", "B content"]) as mock_fetch:
+        result = _append_linked_content(text)
+    assert mock_fetch.call_count == 2
+    assert "A content" in result and "B content" in result
