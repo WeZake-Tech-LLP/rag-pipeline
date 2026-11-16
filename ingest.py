@@ -69,6 +69,8 @@ def detect_url_type(url: str) -> str:
         return "facebook"
     elif "instagram.com" in url:
         return "instagram"
+    elif "github.com" in url:
+        return "github"
     else:
         return "article"
 
@@ -496,6 +498,49 @@ def extract_reddit(url: str, follow_links: bool = True):
         return None, "failed", f"Reddit extraction failed: {e}"
 
 
+def extract_github(url: str):
+    import base64
+
+    match = re.search(r"github\.com/([^/]+)/([^/?#]+)", url)
+    if not match:
+        return None, "failed", "Could not parse a GitHub owner/repo from the URL"
+
+    owner, repo = match.group(1), match.group(2)
+    headers = {"User-Agent": "rag-knowledge-base/1.0", "Accept": "application/vnd.github+json"}
+
+    try:
+        repo_response = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}", headers=headers, timeout=15
+        )
+        if repo_response.status_code != 200:
+            return None, "failed", f"GitHub returned status {repo_response.status_code} for {owner}/{repo}"
+        repo_data = repo_response.json()
+    except Exception as e:
+        return None, "failed", f"GitHub extraction failed: {e}"
+
+    parts = [
+        f"Title: {repo_data.get('full_name', f'{owner}/{repo}')}",
+        f"Description: {repo_data.get('description') or 'No description provided.'}",
+        f"Topics: {', '.join(repo_data.get('topics', [])) or 'none'}",
+        f"Stars: {repo_data.get('stargazers_count', 0)}",
+    ]
+
+    try:
+        readme_response = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}/readme", headers=headers, timeout=15
+        )
+        if readme_response.status_code == 200:
+            readme_data = readme_response.json()
+            content_b64 = readme_data.get("content", "")
+            readme_text = base64.b64decode(content_b64).decode("utf-8", errors="replace")
+            parts.append(f"README:\n{readme_text}")
+    except Exception:
+        pass  # no README is fine — metadata alone is still useful
+
+    text = "\n\n".join(parts).strip()
+    return text, "github_api", None
+
+
 def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
     """Dispatch to the right extractor for a detected type.
 
@@ -521,6 +566,9 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
         chunk_size, chunk_overlap = 512, 50
     elif url_type == "instagram":
         text, quality, error = extract_instagram(url)
+        chunk_size, chunk_overlap = 512, 50
+    elif url_type == "github":
+        text, quality, error = extract_github(url)
         chunk_size, chunk_overlap = 512, 50
     else:
         text, quality, error = extract_article(url)
