@@ -95,6 +95,15 @@ async def handle_message(update, context) -> None:
     user_id = update.effective_user.id
     text = update.message.text or ""
 
+    code = parse_start_command(text)
+    if code is not None:
+        if code == get_invite_code():
+            save_approved_users(load_approved_users() | {user_id})
+            await update.message.reply_text(
+                "✅ You're in! Send a link to save it, or ask a question."
+            )
+        return
+
     if not is_authorized(user_id, get_all_authorized_ids()):
         return
 

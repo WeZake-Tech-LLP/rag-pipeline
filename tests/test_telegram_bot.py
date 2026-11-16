@@ -202,3 +202,41 @@ def test_parse_start_command_returns_none_for_bare_start():
 def test_parse_start_command_returns_none_for_non_start_text():
     from telegram_bot import parse_start_command
     assert parse_start_command("what is this about?") is None
+
+
+def test_handle_message_approves_new_user_with_correct_code():
+    update = _make_update(999, "/start family2026")
+    with patch("telegram_bot.get_invite_code", return_value="family2026"), \
+         patch("telegram_bot.load_approved_users", return_value=set()), \
+         patch("telegram_bot.save_approved_users") as mock_save:
+        asyncio.run(handle_message(update, None))
+    mock_save.assert_called_once_with({999})
+    update.message.reply_text.assert_called_once()
+    assert "in" in update.message.reply_text.call_args.args[0].lower()
+
+
+def test_handle_message_ignores_start_with_wrong_code():
+    update = _make_update(999, "/start wrongcode")
+    with patch("telegram_bot.get_invite_code", return_value="family2026"), \
+         patch("telegram_bot.save_approved_users") as mock_save:
+        asyncio.run(handle_message(update, None))
+    mock_save.assert_not_called()
+    update.message.reply_text.assert_not_called()
+
+
+def test_handle_message_allows_previously_approved_user():
+    update = _make_update(222, "what is this about?")
+    with patch("telegram_bot.get_allowed_user_id", return_value=111), \
+         patch("telegram_bot.load_approved_users", return_value={222}), \
+         patch("telegram_bot.build_reply", return_value="done"):
+        asyncio.run(handle_message(update, None))
+    assert update.message.reply_text.call_count == 2
+    assert update.message.reply_text.call_args_list[-1].args[0] == "done"
+
+
+def test_handle_message_ignores_bare_start_from_unapproved_stranger():
+    update = _make_update(999, "/start")
+    with patch("telegram_bot.get_allowed_user_id", return_value=111), \
+         patch("telegram_bot.load_approved_users", return_value=set()):
+        asyncio.run(handle_message(update, None))
+    update.message.reply_text.assert_not_called()
