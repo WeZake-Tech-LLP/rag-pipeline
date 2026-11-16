@@ -63,6 +63,47 @@ def test_find_platform_urls_respects_custom_max_links():
     assert result == ["https://github.com/a/a", "https://github.com/b/b"]
 
 
+def test_find_platform_urls_excludes_substring_false_positives():
+    # "x.com" is a substring of "dropbox.com"/"vox.com" — a naive
+    # substring check on detect_url_type's domain list would wrongly
+    # classify these as X/Twitter links.
+    text = (
+        "Backup your files at https://www.dropbox.com/s/abc123/file.pdf, "
+        "read the news at https://www.vox.com/politics/123, "
+        "or check the repo at https://github.com/real/repo"
+    )
+    assert _find_platform_urls(text) == ["https://github.com/real/repo"]
+
+
+def test_find_platform_urls_excludes_share_buttons():
+    text = (
+        "Share: https://twitter.com/intent/tweet?text=hi "
+        "https://www.facebook.com/sharer/sharer.php?u=x "
+        "https://www.linkedin.com/shareArticle?url=x "
+        "https://www.reddit.com/submit?url=x "
+        "Repo: https://github.com/real/repo"
+    )
+    assert _find_platform_urls(text) == ["https://github.com/real/repo"]
+
+
+def test_find_platform_urls_handles_markdown_link_syntax():
+    text = "**[Flask](https://github.com/pallets/flask)** is great"
+    assert _find_platform_urls(text) == ["https://github.com/pallets/flask"]
+
+
+def test_find_platform_urls_handles_adjacent_markdown_links():
+    text = "[Home](https://example.com/)[Repo](https://github.com/pallets/flask)"
+    assert _find_platform_urls(text) == ["https://github.com/pallets/flask"]
+
+
+def test_find_platform_urls_ignores_image_markdown_links():
+    text = (
+        "![Image 1: thumb](https://img.youtube.com/vi/dQw4w9WgXcQ/0.jpg) "
+        "Check this repo: https://github.com/pallets/flask"
+    )
+    assert _find_platform_urls(text) == ["https://github.com/pallets/flask"]
+
+
 def test_append_linked_content_adds_section_per_url():
     text = "Article body mentions https://github.com/pallets/flask."
     with patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
@@ -82,7 +123,11 @@ def test_append_linked_content_returns_text_unchanged_when_no_platform_links():
 
 
 def test_append_linked_content_skips_section_when_fetch_returns_none():
-    text = "A share-button link: https://twitter.com/intent/tweet?text=hi"
+    # A real platform link whose fetch fails (e.g. a 404) still counts
+    # against the cap but contributes no section — distinct from a
+    # share-button link, which is now filtered out before any fetch
+    # is attempted (see test_find_platform_urls_excludes_share_buttons).
+    text = "A broken repo link: https://github.com/does-not/exist"
     with patch("ingest._fetch_linked_content", return_value=None) as mock_fetch:
         result = _append_linked_content(text)
     mock_fetch.assert_called_once()
@@ -119,3 +164,22 @@ def test_extract_article_appends_linked_content_on_beautifulsoup_fallback():
     assert mock_append.call_args.args[0].strip() == "y" * 250
     assert text == "EXPANDED"
     assert quality == "full_text"
+
+
+def test_extract_article_follows_href_links_in_beautifulsoup_fallback():
+    # get_text() throws away <a href="..."> attributes, so a link that's
+    # only reachable via markup (not visible as a bare URL in the text)
+    # must still be found and followed on the fallback path.
+    jina_response = MagicMock(status_code=500, text="error")
+    html = (
+        "<html><body><article><p>" + ("y" * 250) + "</p>"
+        '<a href="https://github.com/pallets/flask">Flask</a>'
+        "</article></body></html>"
+    )
+    fallback_response = MagicMock(status_code=200, text=html)
+    with patch("ingest.requests.get", side_effect=[jina_response, fallback_response]), \
+         patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_article("https://example.com/post")
+    mock_fetch.assert_called_once_with("https://github.com/pallets/flask")
+    assert "Linked Content: https://github.com/pallets/flask" in text
+    assert "Flask README text" in text

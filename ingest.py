@@ -311,9 +311,15 @@ def extract_article(url: str):
             tag.decompose()
 
         content = ""
+        href_urls = []
         for selector in ["article", "main", "div.content", "div.post"]:
             el = soup.select_one(selector)
             if el:
+                from urllib.parse import urljoin
+
+                href_urls = [
+                    urljoin(url, a.get("href")) for a in el.find_all("a", href=True) if a.get("href")
+                ]
                 content = el.get_text(separator=" ", strip=True)
                 break
 
@@ -321,7 +327,11 @@ def extract_article(url: str):
             content = " ".join(p.get_text(strip=True) for p in soup.find_all("p"))
 
         if len(content.strip()) > 200:
-            return _append_linked_content(content.strip()), "full_text", None
+            return (
+                _append_linked_content(content.strip(), extra_scan_text=" ".join(href_urls)),
+                "full_text",
+                None,
+            )
     except Exception:
         pass
 
@@ -418,13 +428,43 @@ def _find_external_url(text: str) -> Optional[str]:
     return None
 
 
+_PLATFORM_HOSTS = {
+    "youtube.com", "youtu.be",
+    "linkedin.com", "lnkd.in",
+    "reddit.com", "redd.it",
+    "x.com", "twitter.com",
+    "facebook.com", "fb.com",
+    "instagram.com",
+    "github.com",
+}
+
+_SHARE_PATH_MARKERS = ("/intent/", "/share", "sharer", "sharearticle", "/submit")
+
+
+def _is_platform_host(host: str) -> bool:
+    # Host-exact/suffix matching, not substring matching on the full URL —
+    # detect_url_type()'s "x.com" in url check also matches unrelated
+    # domains like dropbox.com/vox.com ("...bo[x.com]"), which is fine for
+    # its original single-URL use but wrongly sweeps in nav/CDN noise once
+    # a whole article body gets scanned for several links.
+    host = host.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return any(host == domain or host.endswith("." + domain) for domain in _PLATFORM_HOSTS)
+
+
 def _find_platform_urls(text: str, max_links: int = 4) -> List[str]:
+    from urllib.parse import urlsplit
+
+    stripped = _strip_image_markdown(text)
     found = []
-    for match in re.finditer(r"https?://\S+", text):
+    for match in re.finditer(r'https?://[^\s)\]*<"\']+', stripped):
         candidate = match.group(0).rstrip(").,;:!?\"'][}{")
         if candidate in found:
             continue
-        if detect_url_type(candidate) == "article":
+        if any(marker in candidate.lower() for marker in _SHARE_PATH_MARKERS):
+            continue
+        if not _is_platform_host(urlsplit(candidate).netloc):
             continue
         found.append(candidate)
         if len(found) >= max_links:
@@ -591,9 +631,14 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
     return text, quality, error, chunk_size, chunk_overlap
 
 
-def _append_linked_content(text: str, max_links: int = 4) -> str:
+def _append_linked_content(text: str, max_links: int = 4, extra_scan_text: str = "") -> str:
+    # extra_scan_text lets a caller feed in links that don't appear as
+    # bare URLs in `text` itself (e.g. <a href> targets BeautifulSoup's
+    # get_text() already discarded) without those raw URLs polluting the
+    # stored/returned content.
+    scan_text = f"{text} {extra_scan_text}" if extra_scan_text else text
     result = text
-    for url in _find_platform_urls(text, max_links=max_links):
+    for url in _find_platform_urls(scan_text, max_links=max_links):
         content = _fetch_linked_content(url)
         if content:
             result += f"\n\nLinked Content: {url}\n{content}"
