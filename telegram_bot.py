@@ -43,6 +43,11 @@ def save_approved_users(users: set) -> None:
         json.dump(sorted(users), f)
 
 
+def parse_start_command(text: str) -> Optional[str]:
+    match = re.match(r"^/start\s+(\S+)$", text)
+    return match.group(1) if match else None
+
+
 def get_allowed_user_id() -> int:
     raw = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
     if not raw:

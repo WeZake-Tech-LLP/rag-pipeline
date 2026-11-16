@@ -178,3 +178,18 @@ def test_save_then_load_approved_users_round_trips(tmp_path, monkeypatch):
     monkeypatch.setattr(telegram_bot, "APPROVED_USERS_PATH", str(tmp_path / "approved.json"))
     telegram_bot.save_approved_users({111, 222})
     assert telegram_bot.load_approved_users() == {111, 222}
+
+
+def test_parse_start_command_extracts_code():
+    from telegram_bot import parse_start_command
+    assert parse_start_command("/start family2026") == "family2026"
+
+
+def test_parse_start_command_returns_none_for_bare_start():
+    from telegram_bot import parse_start_command
+    assert parse_start_command("/start") is None
+
+
+def test_parse_start_command_returns_none_for_non_start_text():
+    from telegram_bot import parse_start_command
+    assert parse_start_command("what is this about?") is None
