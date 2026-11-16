@@ -252,6 +252,25 @@ def test_handle_message_ignores_bare_start_from_unapproved_stranger():
     update.message.reply_text.assert_not_called()
 
 
+def test_get_group_chat_id_missing_returns_none(monkeypatch):
+    from telegram_bot import get_group_chat_id
+    monkeypatch.delenv("TELEGRAM_GROUP_CHAT_ID", raising=False)
+    assert get_group_chat_id() is None
+
+
+def test_get_group_chat_id_present_returns_int(monkeypatch):
+    from telegram_bot import get_group_chat_id
+    monkeypatch.setenv("TELEGRAM_GROUP_CHAT_ID", "-1001234567890")
+    assert get_group_chat_id() == -1001234567890
+
+
+def test_get_group_chat_id_non_numeric_raises(monkeypatch):
+    from telegram_bot import get_group_chat_id
+    monkeypatch.setenv("TELEGRAM_GROUP_CHAT_ID", "not-a-number")
+    with pytest.raises(RuntimeError):
+        get_group_chat_id()
+
+
 def test_handle_message_ignores_start_when_invite_code_not_configured():
     # TELEGRAM_INVITE_CODE is documented as optional; a stranger sending
     # /start <anything> must not crash the handler when it's unset.

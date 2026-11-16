@@ -68,6 +68,18 @@ def get_allowed_user_id() -> int:
         )
 
 
+def get_group_chat_id() -> Optional[int]:
+    raw = os.getenv("TELEGRAM_GROUP_CHAT_ID", "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise RuntimeError(
+            f"TELEGRAM_GROUP_CHAT_ID must be numeric, got: {raw!r}"
+        )
+
+
 def extract_first_url(text: str) -> Optional[str]:
     match = _URL_PATTERN.search(text)
     return match.group(0) if match else None
