@@ -1,5 +1,5 @@
-from unittest.mock import patch
-from ingest import format_ingest_reply, _find_platform_urls, _append_linked_content
+from unittest.mock import MagicMock, patch
+from ingest import format_ingest_reply, _find_platform_urls, _append_linked_content, extract_article
 
 
 def test_format_ingest_reply_success():
@@ -95,3 +95,27 @@ def test_append_linked_content_adds_one_section_per_distinct_url():
         result = _append_linked_content(text)
     assert mock_fetch.call_count == 2
     assert "A content" in result and "B content" in result
+
+
+def test_extract_article_appends_linked_content_on_jina_success():
+    jina_response = MagicMock(status_code=200, text="x" * 400)
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._append_linked_content", return_value="EXPANDED") as mock_append:
+        text, quality, error = extract_article("https://example.com/post")
+    mock_append.assert_called_once_with("x" * 400)
+    assert text == "EXPANDED"
+    assert quality == "full_text"
+    assert error is None
+
+
+def test_extract_article_appends_linked_content_on_beautifulsoup_fallback():
+    jina_response = MagicMock(status_code=500, text="error")
+    html = "<html><body><article><p>" + ("y" * 250) + "</p></article></body></html>"
+    fallback_response = MagicMock(status_code=200, text=html)
+    with patch("ingest.requests.get", side_effect=[jina_response, fallback_response]), \
+         patch("ingest._append_linked_content", return_value="EXPANDED") as mock_append:
+        text, quality, error = extract_article("https://example.com/post")
+    mock_append.assert_called_once()
+    assert mock_append.call_args.args[0].strip() == "y" * 250
+    assert text == "EXPANDED"
+    assert quality == "full_text"

@@ -299,7 +299,7 @@ def extract_article(url: str):
         response = requests.get(jina_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         text = response.text.strip()
         if response.status_code == 200 and len(text) > 300 and not _is_jina_error_response(text):
-            return text, "full_text", None
+            return _append_linked_content(text), "full_text", None
     except Exception:
         pass
 
@@ -321,7 +321,7 @@ def extract_article(url: str):
             content = " ".join(p.get_text(strip=True) for p in soup.find_all("p"))
 
         if len(content.strip()) > 200:
-            return content.strip(), "full_text", None
+            return _append_linked_content(content.strip()), "full_text", None
     except Exception:
         pass
 
