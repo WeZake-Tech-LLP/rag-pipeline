@@ -65,8 +65,12 @@ def extract_first_url(text: str) -> Optional[str]:
     return match.group(0) if match else None
 
 
-def is_authorized(user_id: int, allowed_id: int) -> bool:
-    return user_id == allowed_id
+def is_authorized(user_id: int, allowed_ids) -> bool:
+    return user_id in allowed_ids
+
+
+def get_all_authorized_ids() -> set:
+    return {get_allowed_user_id()} | load_approved_users()
 
 
 
@@ -91,7 +95,7 @@ async def handle_message(update, context) -> None:
     user_id = update.effective_user.id
     text = update.message.text or ""
 
-    if not is_authorized(user_id, get_allowed_user_id()):
+    if not is_authorized(user_id, get_all_authorized_ids()):
         return
 
     ack = "⏳ Processing..." if extract_first_url(text) else "⏳ Searching..."

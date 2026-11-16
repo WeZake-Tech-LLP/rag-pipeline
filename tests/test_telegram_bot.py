@@ -56,11 +56,18 @@ def test_extract_first_url_picks_first_of_multiple():
 
 
 def test_is_authorized_true_for_matching_id():
-    assert is_authorized(111, 111) is True
+    assert is_authorized(111, {111}) is True
 
 
 def test_is_authorized_false_for_other_id():
-    assert is_authorized(111, 222) is False
+    assert is_authorized(111, {222}) is False
+
+
+def test_get_all_authorized_ids_includes_owner_and_approved(monkeypatch):
+    import telegram_bot
+    monkeypatch.setattr(telegram_bot, "get_allowed_user_id", lambda: 111)
+    monkeypatch.setattr(telegram_bot, "load_approved_users", lambda: {222, 333})
+    assert telegram_bot.get_all_authorized_ids() == {111, 222, 333}
 
 
 def test_format_ingest_reply_success():
@@ -139,7 +146,8 @@ def _make_update(user_id, text):
 
 def test_handle_message_ignores_unauthorized_sender():
     update = _make_update(999, "https://example.com")
-    with patch("telegram_bot.get_allowed_user_id", return_value=111):
+    with patch("telegram_bot.get_allowed_user_id", return_value=111), \
+         patch("telegram_bot.load_approved_users", return_value=set()):
         asyncio.run(handle_message(update, None))
     update.message.reply_text.assert_not_called()
 
@@ -147,6 +155,7 @@ def test_handle_message_ignores_unauthorized_sender():
 def test_handle_message_replies_for_authorized_sender():
     update = _make_update(111, "https://example.com")
     with patch("telegram_bot.get_allowed_user_id", return_value=111), \
+         patch("telegram_bot.load_approved_users", return_value=set()), \
          patch("telegram_bot.build_reply", return_value="done"):
         asyncio.run(handle_message(update, None))
     assert update.message.reply_text.call_count == 2  # ack, then final reply
