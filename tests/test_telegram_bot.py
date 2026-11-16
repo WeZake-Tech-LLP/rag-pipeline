@@ -350,3 +350,56 @@ def test_handle_message_ignores_start_when_invite_code_not_configured():
         asyncio.run(handle_message(update, None))
     mock_save.assert_not_called()
     update.message.reply_text.assert_not_called()
+
+
+def test_main_wires_handlers_with_correct_filters(monkeypatch):
+    # Catches two things a wrong filter expression would otherwise let
+    # slip past every unit test above: the group/DM chat boundary, and
+    # edited-message updates (where update.message is None) reaching a
+    # handler that assumes it isn't.
+    from datetime import datetime
+    from telegram import Update, Message, Chat, User
+    from telegram.ext import Application
+    import telegram_bot
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789:abcdefghijklmnopqrstuvwxyz0123456789")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_ID", "111")
+    monkeypatch.setenv("TELEGRAM_GROUP_CHAT_ID", "-1009876543210")
+
+    captured = {}
+
+    def fake_run_polling(self, *args, **kwargs):
+        captured["app"] = self
+
+    monkeypatch.setattr(Application, "run_polling", fake_run_polling)
+
+    telegram_bot.main()
+    application = captured["app"]
+
+    def make_update(update_id, chat_id, chat_type, text, edited=False):
+        chat = Chat(id=chat_id, type=chat_type)
+        user = User(id=111, is_bot=False, first_name="T")
+        message = Message(
+            message_id=update_id, date=datetime.now(), chat=chat, from_user=user, text=text
+        )
+        key = "edited_message" if edited else "message"
+        return Update(update_id=update_id, **{key: message})
+
+    group_update = make_update(1, -1009876543210, "group", "https://example.com")
+    dm_update = make_update(2, 111, "private", "hi")
+    other_group_update = make_update(3, -999, "group", "https://example.com")
+    edited_group_update = make_update(4, -1009876543210, "group", "https://example.com", edited=True)
+    edited_dm_update = make_update(5, 111, "private", "hi", edited=True)
+
+    handlers = application.handlers[0]
+    group_handler = next(h for h in handlers if h.callback is telegram_bot.handle_group_message)
+    dm_handler = next(h for h in handlers if h.callback is telegram_bot.handle_message)
+
+    assert group_handler.check_update(group_update)
+    assert not group_handler.check_update(dm_update)
+    assert not group_handler.check_update(other_group_update)
+    assert not group_handler.check_update(edited_group_update)
+
+    assert dm_handler.check_update(dm_update)
+    assert not dm_handler.check_update(group_update)
+    assert not dm_handler.check_update(edited_dm_update)

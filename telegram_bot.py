@@ -163,14 +163,17 @@ def main() -> None:
 
     application = Application.builder().token(token).build()
     application.add_handler(
-        MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, handle_message)
+        MessageHandler(
+            filters.TEXT & filters.UpdateType.MESSAGE & filters.ChatType.PRIVATE,
+            handle_message,
+        )
     )
 
     group_chat_id = get_group_chat_id()
     if group_chat_id is not None:
         application.add_handler(
             MessageHandler(
-                filters.TEXT & filters.Chat(chat_id=group_chat_id),
+                filters.TEXT & filters.UpdateType.MESSAGE & filters.Chat(chat_id=group_chat_id),
                 handle_group_message,
             )
         )

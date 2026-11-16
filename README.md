@@ -177,26 +177,32 @@ confirmation reply. Everything else in the group — questions, regular
 chat — is ignored completely; there's no Q&A in group context, only in
 DMs.
 
-1. **Add the bot to the group** like any other member.
-2. **Disable the bot's privacy mode.** By default, bots only see
+1. **Disable the bot's privacy mode first.** By default, bots only see
    messages that mention them. Message **@BotFather**, send
-   `/mypbots`, pick your bot, go to **Bot Settings → Group Privacy**,
-   and turn privacy **off**. Without this, the bot can't see plain
-   links posted in the group.
-3. **Find the group's numeric chat ID.** Send any message in the
-   group, then visit
+   `/mybots`, pick your bot, go to **Bot Settings → Group Privacy**,
+   and turn privacy **off**. Telegram generally only applies this to
+   groups the bot joins *after* the change, so do this before the next
+   step — if the bot is already in the group, remove it and re-add it
+   afterward.
+2. **Add the bot to the group** like any other member.
+3. **Stop the bot process** if it's already running, then send any
+   message in the group. Visit
    `https://api.telegram.org/bot<your_token_here>/getUpdates` in a
-   browser and look for `"chat":{"id": ...}` in the response. Group
-   chat IDs are negative numbers.
+   browser and look for `"chat":{"id": ...}` in the response — that's
+   the group's numeric chat ID (negative for groups; `-100...` for
+   supergroups). This only works while the bot isn't polling, since a
+   running bot consumes each update before `getUpdates` can read it.
 4. **Add it to `.env`:**
 
    ```env
    TELEGRAM_GROUP_CHAT_ID=your_negative_group_chat_id_here
    ```
 
-5. **Restart the bot.** From then on, any link posted in that group is
+5. **Start the bot.** From then on, any link posted in that group is
    ingested into the same shared knowledge base as DMs and the
-   Streamlit UI; non-link messages get no reply at all.
+   Streamlit UI; non-link messages get no reply at all. If the group is
+   later converted to a supergroup, its chat ID changes (it gains the
+   `-100` prefix) and `TELEGRAM_GROUP_CHAT_ID` must be updated to match.
 
 If `TELEGRAM_GROUP_CHAT_ID` is left unset, this feature is simply off
 and the bot behaves exactly as it does today.
