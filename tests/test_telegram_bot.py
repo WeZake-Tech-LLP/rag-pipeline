@@ -271,6 +271,76 @@ def test_get_group_chat_id_non_numeric_raises(monkeypatch):
         get_group_chat_id()
 
 
+def test_build_group_reply_returns_none_without_url():
+    from telegram_bot import build_group_reply
+    assert build_group_reply("just chatting, no link here") is None
+
+
+def test_build_group_reply_returns_none_for_empty_text():
+    from telegram_bot import build_group_reply
+    assert build_group_reply("") is None
+
+
+def test_build_group_reply_ingests_url_found_in_mixed_text():
+    from telegram_bot import build_group_reply
+    with patch(
+        "telegram_bot.ingest_url",
+        return_value={"success": True, "duplicate": False, "chunks_stored": 2, "extraction_quality": "full_text", "url_type": "article"},
+    ) as mock_ingest:
+        reply = build_group_reply("check this out https://example.com/post")
+    mock_ingest.assert_called_once_with("https://example.com/post")
+    assert reply is not None and "2" in reply
+
+
+def test_build_group_reply_ingests_only_first_of_multiple_urls():
+    from telegram_bot import build_group_reply
+    with patch(
+        "telegram_bot.ingest_url",
+        return_value={"success": True, "duplicate": False, "chunks_stored": 1, "extraction_quality": "full_text", "url_type": "article"},
+    ) as mock_ingest:
+        build_group_reply("https://a.com/1 and https://b.com/2")
+    mock_ingest.assert_called_once_with("https://a.com/1")
+
+
+def test_build_group_reply_formats_duplicate():
+    from telegram_bot import build_group_reply
+    with patch(
+        "telegram_bot.ingest_url",
+        return_value={"success": True, "duplicate": True, "message": "URL already exists in knowledge base"},
+    ):
+        reply = build_group_reply("https://example.com/post")
+    assert "already exists" in reply.lower()
+
+
+def test_build_group_reply_catches_exception_from_ingest():
+    from telegram_bot import build_group_reply
+    with patch("telegram_bot.ingest_url", side_effect=RuntimeError("boom")):
+        reply = build_group_reply("https://example.com/post")
+    assert "boom" in reply
+
+
+def test_handle_group_message_sends_no_reply_without_url():
+    from telegram_bot import handle_group_message
+    update = _make_update(111, "just chatting")
+    asyncio.run(handle_group_message(update, None))
+    update.message.reply_text.assert_not_called()
+
+
+def test_handle_group_message_sends_no_reply_for_none_text():
+    from telegram_bot import handle_group_message
+    update = _make_update(111, None)
+    asyncio.run(handle_group_message(update, None))
+    update.message.reply_text.assert_not_called()
+
+
+def test_handle_group_message_sends_reply_for_link():
+    from telegram_bot import handle_group_message
+    update = _make_update(111, "https://example.com/post")
+    with patch("telegram_bot.build_group_reply", return_value="✅ done"):
+        asyncio.run(handle_group_message(update, None))
+    update.message.reply_text.assert_called_once_with("✅ done")
+
+
 def test_handle_message_ignores_start_when_invite_code_not_configured():
     # TELEGRAM_INVITE_CODE is documented as optional; a stranger sending
     # /start <anything> must not crash the handler when it's unset.

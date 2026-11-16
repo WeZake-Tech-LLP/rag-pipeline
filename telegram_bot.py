@@ -111,6 +111,25 @@ def build_reply(text: str) -> str:
     return format_query_reply(result)
 
 
+def build_group_reply(text: str) -> Optional[str]:
+    url = extract_first_url(text)
+    if not url:
+        return None
+    try:
+        result = ingest_url(url)
+    except Exception as e:
+        return f"❌ Error: {e}"
+    return format_ingest_reply(result)
+
+
+async def handle_group_message(update, context) -> None:
+    text = update.message.text or ""
+    reply = build_group_reply(text)
+    if reply is None:
+        return
+    await update.message.reply_text(reply)
+
+
 async def handle_message(update, context) -> None:
     user_id = update.effective_user.id
     text = update.message.text or ""
