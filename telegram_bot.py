@@ -34,13 +34,21 @@ def get_invite_code() -> str:
 def load_approved_users() -> set:
     if not os.path.exists(APPROVED_USERS_PATH):
         return set()
-    with open(APPROVED_USERS_PATH) as f:
-        return set(json.load(f))
+    try:
+        with open(APPROVED_USERS_PATH) as f:
+            return set(json.load(f))
+    except (json.JSONDecodeError, ValueError):
+        # A corrupt or truncated file must not take authorization down
+        # for everyone (the owner's check reads this too) — degrade to
+        # "no approved extra users" instead of crashing.
+        return set()
 
 
 def save_approved_users(users: set) -> None:
-    with open(APPROVED_USERS_PATH, "w") as f:
+    tmp_path = APPROVED_USERS_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(sorted(users), f)
+    os.replace(tmp_path, APPROVED_USERS_PATH)
 
 
 def parse_start_command(text: str) -> Optional[str]:
@@ -97,7 +105,13 @@ async def handle_message(update, context) -> None:
 
     code = parse_start_command(text)
     if code is not None:
-        if code == get_invite_code():
+        try:
+            invite_code = get_invite_code()
+        except RuntimeError:
+            # TELEGRAM_INVITE_CODE is optional; treat it as "invites
+            # disabled" rather than crashing on a stranger's /start.
+            return
+        if code == invite_code:
             save_approved_users(load_approved_users() | {user_id})
             await update.message.reply_text(
                 "✅ You're in! Send a link to save it, or ask a question."

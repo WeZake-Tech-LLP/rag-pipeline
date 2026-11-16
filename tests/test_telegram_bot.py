@@ -182,6 +182,16 @@ def test_load_approved_users_missing_file_returns_empty_set(tmp_path, monkeypatc
     assert telegram_bot.load_approved_users() == set()
 
 
+def test_load_approved_users_tolerates_corrupt_file(tmp_path, monkeypatch):
+    # A bad or truncated file must not crash authorization for the owner
+    # too (get_all_authorized_ids() calls this on every message).
+    import telegram_bot
+    bad_file = tmp_path / "approved.json"
+    bad_file.write_text("[222,")
+    monkeypatch.setattr(telegram_bot, "APPROVED_USERS_PATH", str(bad_file))
+    assert telegram_bot.load_approved_users() == set()
+
+
 def test_save_then_load_approved_users_round_trips(tmp_path, monkeypatch):
     import telegram_bot
     monkeypatch.setattr(telegram_bot, "APPROVED_USERS_PATH", str(tmp_path / "approved.json"))
@@ -239,4 +249,15 @@ def test_handle_message_ignores_bare_start_from_unapproved_stranger():
     with patch("telegram_bot.get_allowed_user_id", return_value=111), \
          patch("telegram_bot.load_approved_users", return_value=set()):
         asyncio.run(handle_message(update, None))
+    update.message.reply_text.assert_not_called()
+
+
+def test_handle_message_ignores_start_when_invite_code_not_configured():
+    # TELEGRAM_INVITE_CODE is documented as optional; a stranger sending
+    # /start <anything> must not crash the handler when it's unset.
+    update = _make_update(999, "/start anything")
+    with patch("telegram_bot.get_invite_code", side_effect=RuntimeError("TELEGRAM_INVITE_CODE is not set in .env")), \
+         patch("telegram_bot.save_approved_users") as mock_save:
+        asyncio.run(handle_message(update, None))
+    mock_save.assert_not_called()
     update.message.reply_text.assert_not_called()
