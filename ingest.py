@@ -430,6 +430,7 @@ _PLATFORM_LABEL_HOSTS = {
     "Instagram": frozenset({"instagram.com"}),
     "X": frozenset({"x.com", "twitter.com"}),
     "Reddit": frozenset({"reddit.com", "redd.it"}),
+    "GitHub": frozenset({"github.com"}),
 }
 
 _REDIRECTOR_NETWORK_HOSTS = frozenset({"t.co", "lnkd.in"})
@@ -627,7 +628,7 @@ def extract_reddit(url: str, follow_links: bool = True):
         return None, "failed", f"Reddit extraction failed: {e}"
 
 
-def extract_github(url: str):
+def extract_github(url: str, follow_links: bool = True):
     import base64
 
     match = re.search(r"github\.com/([^/]+)/([^/?#]+)", url)
@@ -667,6 +668,10 @@ def extract_github(url: str):
         pass  # no README is fine — metadata alone is still useful
 
     text = "\n\n".join(parts).strip()
+    if follow_links:
+        text = _append_linked_content(
+            text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("GitHub", frozenset()), allow_any_host=True
+        )
     return text, "github_api", None
 
 
@@ -697,7 +702,7 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
         text, quality, error = extract_instagram(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 512, 50
     elif url_type == "github":
-        text, quality, error = extract_github(url)
+        text, quality, error = extract_github(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 512, 50
     else:
         text, quality, error = extract_article(url, follow_links=follow_links)

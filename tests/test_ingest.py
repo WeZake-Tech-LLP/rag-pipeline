@@ -9,6 +9,8 @@ from ingest import (
     extract_instagram,
     extract_x,
     extract_reddit,
+    extract_github,
+    extract_youtube,
     _fetch_linked_content,
     _resolve_redirector,
 )
@@ -444,6 +446,50 @@ def test_fetch_linked_content_does_not_recurse_through_instagram():
     with patch("ingest.requests.get", return_value=jina_response), \
          patch("ingest._append_linked_content") as mock_append:
         _fetch_linked_content("https://www.instagram.com/p/my456/")
+    mock_append.assert_not_called()
+
+
+def _github_responses(readme_text):
+    import base64
+    repo_response = MagicMock(status_code=200)
+    repo_response.json.return_value = {
+        "full_name": "real/repo", "description": "desc", "topics": [], "stargazers_count": 5,
+    }
+    readme_response = MagicMock(status_code=200)
+    readme_response.json.return_value = {"content": base64.b64encode(readme_text.encode()).decode()}
+    return repo_response, readme_response
+
+
+def test_extract_github_follows_link_in_readme():
+    repo_response, readme_response = _github_responses("See our docs at https://nytimes.com/2026/article")
+    with patch("ingest.requests.get", side_effect=[repo_response, readme_response]), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_github("https://github.com/real/repo")
+    mock_fetch.assert_called_once_with("https://nytimes.com/2026/article")
+    assert "Article text" in text
+
+
+def test_extract_github_excludes_links_to_other_github_repos():
+    repo_response, readme_response = _github_responses("Fork of https://github.com/other/repo")
+    with patch("ingest.requests.get", side_effect=[repo_response, readme_response]), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_github("https://github.com/real/repo")
+    mock_fetch.assert_not_called()
+
+
+def test_extract_github_does_not_follow_links_when_follow_links_false():
+    repo_response, readme_response = _github_responses("See our docs at https://nytimes.com/2026/article")
+    with patch("ingest.requests.get", side_effect=[repo_response, readme_response]), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_github("https://github.com/real/repo", follow_links=False)
+    mock_fetch.assert_not_called()
+
+
+def test_fetch_linked_content_does_not_recurse_through_github():
+    repo_response, readme_response = _github_responses("x")
+    with patch("ingest.requests.get", side_effect=[repo_response, readme_response]), \
+         patch("ingest._append_linked_content") as mock_append:
+        _fetch_linked_content("https://github.com/real/repo")
     mock_append.assert_not_called()
 
 
