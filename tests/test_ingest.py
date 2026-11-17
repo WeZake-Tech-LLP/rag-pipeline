@@ -7,6 +7,7 @@ from ingest import (
     extract_linkedin,
     extract_facebook,
     extract_instagram,
+    _fetch_linked_content,
 )
 
 
@@ -226,6 +227,70 @@ def test_extract_via_jina_or_meta_applies_link_following_on_meta_fallback():
     assert mock_append.call_args.kwargs.get("exclude_hosts") == frozenset({"linkedin.com", "lnkd.in"})
     assert text == "EXPANDED"
     assert quality == "meta_only"
+
+
+def test_extract_article_does_not_follow_links_when_follow_links_false():
+    jina_response = MagicMock(status_code=200, text="x" * 400 + " https://github.com/real/repo")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_article("https://example.com/post", follow_links=False)
+    mock_fetch.assert_not_called()
+
+
+def test_extract_linkedin_does_not_follow_links_when_follow_links_false():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://github.com/real/repo")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_linkedin("https://www.linkedin.com/posts/my-post_456", follow_links=False)
+    mock_fetch.assert_not_called()
+
+
+def test_extract_facebook_does_not_follow_links_when_follow_links_false():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://github.com/real/repo")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_facebook("https://www.facebook.com/someone/posts/123", follow_links=False)
+    mock_fetch.assert_not_called()
+
+
+def test_extract_instagram_does_not_follow_links_when_follow_links_false():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://github.com/real/repo")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_instagram("https://www.instagram.com/p/my456/", follow_links=False)
+    mock_fetch.assert_not_called()
+
+
+def test_fetch_linked_content_does_not_recurse_through_article():
+    jina_response = MagicMock(status_code=200, text="x" * 400)
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._append_linked_content") as mock_append:
+        _fetch_linked_content("https://example.com/post")
+    mock_append.assert_not_called()
+
+
+def test_fetch_linked_content_does_not_recurse_through_linkedin():
+    jina_response = MagicMock(status_code=200, text="x" * 250)
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._append_linked_content") as mock_append:
+        _fetch_linked_content("https://www.linkedin.com/posts/abc")
+    mock_append.assert_not_called()
+
+
+def test_fetch_linked_content_does_not_recurse_through_facebook():
+    jina_response = MagicMock(status_code=200, text="x" * 250)
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._append_linked_content") as mock_append:
+        _fetch_linked_content("https://www.facebook.com/someone/posts/123")
+    mock_append.assert_not_called()
+
+
+def test_fetch_linked_content_does_not_recurse_through_instagram():
+    jina_response = MagicMock(status_code=200, text="x" * 250)
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._append_linked_content") as mock_append:
+        _fetch_linked_content("https://www.instagram.com/p/my456/")
+    mock_append.assert_not_called()
 
 
 def test_extract_article_appends_linked_content_on_jina_success():

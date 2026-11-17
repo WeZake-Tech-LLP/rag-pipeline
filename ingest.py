@@ -292,14 +292,14 @@ def _is_jina_error_response(text: str) -> bool:
     return False
 
 
-def extract_article(url: str):
+def extract_article(url: str, follow_links: bool = True):
     # Try Jina Reader first
     try:
         jina_url = f"https://r.jina.ai/{url}"
         response = requests.get(jina_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         text = response.text.strip()
         if response.status_code == 200 and len(text) > 300 and not _is_jina_error_response(text):
-            return _append_linked_content(text), "full_text", None
+            return (_append_linked_content(text) if follow_links else text), "full_text", None
     except Exception:
         pass
 
@@ -327,8 +327,11 @@ def extract_article(url: str):
             content = " ".join(p.get_text(strip=True) for p in soup.find_all("p"))
 
         if len(content.strip()) > 200:
+            stripped_content = content.strip()
             return (
-                _append_linked_content(content.strip(), extra_scan_text=" ".join(href_urls)),
+                _append_linked_content(stripped_content, extra_scan_text=" ".join(href_urls))
+                if follow_links
+                else stripped_content,
                 "full_text",
                 None,
             )
@@ -338,18 +341,18 @@ def extract_article(url: str):
     return None, "failed", "Could not extract content"
 
 
-def _extract_via_jina_or_meta(url: str, platform_label: str):
+def _extract_via_jina_or_meta(url: str, platform_label: str, follow_links: bool = True):
     # Try Jina Reader first
     try:
         jina_url = f"https://r.jina.ai/{url}"
         response = requests.get(jina_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         text = response.text.strip()
         if response.status_code == 200 and len(text) > 200 and not _is_jina_error_response(text):
-            return (
-                _append_linked_content(text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())),
-                "full_text",
-                None,
-            )
+            if follow_links:
+                text = _append_linked_content(
+                    text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())
+                )
+            return text, "full_text", None
     except Exception:
         pass
 
@@ -365,29 +368,28 @@ def _extract_via_jina_or_meta(url: str, platform_label: str):
         if desc:
             text += desc.get("content", "")
         if len(text.strip()) > 50:
-            return (
-                _append_linked_content(
-                    text.strip(), exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())
-                ),
-                "meta_only",
-                None,
-            )
+            text = text.strip()
+            if follow_links:
+                text = _append_linked_content(
+                    text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())
+                )
+            return text, "meta_only", None
     except Exception:
         pass
 
     return None, "failed", f"{platform_label} blocked extraction"
 
 
-def extract_linkedin(url: str):
-    return _extract_via_jina_or_meta(url, "LinkedIn")
+def extract_linkedin(url: str, follow_links: bool = True):
+    return _extract_via_jina_or_meta(url, "LinkedIn", follow_links=follow_links)
 
 
-def extract_facebook(url: str):
-    return _extract_via_jina_or_meta(url, "Facebook")
+def extract_facebook(url: str, follow_links: bool = True):
+    return _extract_via_jina_or_meta(url, "Facebook", follow_links=follow_links)
 
 
-def extract_instagram(url: str):
-    return _extract_via_jina_or_meta(url, "Instagram")
+def extract_instagram(url: str, follow_links: bool = True):
+    return _extract_via_jina_or_meta(url, "Instagram", follow_links=follow_links)
 
 
 def extract_x(url: str, follow_links: bool = True):
@@ -627,7 +629,7 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
         text, quality, error = extract_youtube(url)
         chunk_size, chunk_overlap = 800, 100
     elif url_type == "linkedin":
-        text, quality, error = extract_linkedin(url)
+        text, quality, error = extract_linkedin(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 512, 50
     elif url_type == "reddit":
         text, quality, error = extract_reddit(url, follow_links=follow_links)
@@ -636,16 +638,16 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
         text, quality, error = extract_x(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 512, 50
     elif url_type == "facebook":
-        text, quality, error = extract_facebook(url)
+        text, quality, error = extract_facebook(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 512, 50
     elif url_type == "instagram":
-        text, quality, error = extract_instagram(url)
+        text, quality, error = extract_instagram(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 512, 50
     elif url_type == "github":
         text, quality, error = extract_github(url)
         chunk_size, chunk_overlap = 512, 50
     else:
-        text, quality, error = extract_article(url)
+        text, quality, error = extract_article(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 512, 50
 
     return text, quality, error, chunk_size, chunk_overlap
