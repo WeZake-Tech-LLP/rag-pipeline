@@ -75,7 +75,7 @@ def detect_url_type(url: str) -> str:
         return "article"
 
 
-def extract_youtube(url: str):
+def extract_youtube(url: str, follow_links: bool = True):
     # Extract video ID
     patterns = [
         r"(?:v=|\/)([0-9A-Za-z_-]{11}).*",
@@ -253,6 +253,10 @@ def extract_youtube(url: str):
             title = info.get("title", "")
             if description and len(description) > 200:
                 text = f"Video Title: {title}\n\nDescription: {description}"
+                if follow_links:
+                    text = _append_linked_content(
+                        text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("YouTube", frozenset()), allow_any_host=True
+                    )
                 return text, "yt_dlp_meta", None
 
     except ImportError:
@@ -431,6 +435,7 @@ _PLATFORM_LABEL_HOSTS = {
     "X": frozenset({"x.com", "twitter.com"}),
     "Reddit": frozenset({"reddit.com", "redd.it"}),
     "GitHub": frozenset({"github.com"}),
+    "YouTube": frozenset({"youtube.com", "youtu.be"}),
 }
 
 _REDIRECTOR_NETWORK_HOSTS = frozenset({"t.co", "lnkd.in"})
@@ -684,7 +689,7 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
     following never recurses more than one level deep.
     """
     if url_type == "youtube":
-        text, quality, error = extract_youtube(url)
+        text, quality, error = extract_youtube(url, follow_links=follow_links)
         chunk_size, chunk_overlap = 800, 100
     elif url_type == "linkedin":
         text, quality, error = extract_linkedin(url, follow_links=follow_links)

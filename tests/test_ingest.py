@@ -493,6 +493,44 @@ def test_fetch_linked_content_does_not_recurse_through_github():
     mock_append.assert_not_called()
 
 
+def _youtube_description_fallback_mocks(description):
+    mock_ydl = MagicMock()
+    mock_ydl.__enter__.return_value = mock_ydl
+    mock_ydl.extract_info.return_value = {"description": description, "title": "A video"}
+    return mock_ydl
+
+
+def test_extract_youtube_follows_link_in_description_fallback():
+    # Strategy 1 (youtube_transcript_api) fails naturally here — the
+    # installed version doesn't have list_transcripts at all, so this
+    # always falls through via AttributeError, same as in production.
+    mock_ydl = _youtube_description_fallback_mocks(
+        "Check out the full write-up at https://nytimes.com/2026/article " + "x" * 200
+    )
+    with patch("ingest.requests.get", side_effect=Exception("jina failed")), \
+         patch("glob.glob", return_value=[]), \
+         patch("yt_dlp.YoutubeDL", return_value=mock_ydl), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_youtube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    mock_fetch.assert_called_once_with("https://nytimes.com/2026/article")
+    assert "Article text" in text
+    assert quality == "yt_dlp_meta"
+
+
+def test_extract_youtube_does_not_follow_links_when_follow_links_false():
+    mock_ydl = _youtube_description_fallback_mocks(
+        "Check out the full write-up at https://nytimes.com/2026/article " + "x" * 200
+    )
+    with patch("ingest.requests.get", side_effect=Exception("jina failed")), \
+         patch("glob.glob", return_value=[]), \
+         patch("yt_dlp.YoutubeDL", return_value=mock_ydl), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_youtube(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ", follow_links=False
+        )
+    mock_fetch.assert_not_called()
+
+
 def test_extract_article_appends_linked_content_on_jina_success():
     jina_response = MagicMock(status_code=200, text="x" * 400)
     with patch("ingest.requests.get", return_value=jina_response), \
