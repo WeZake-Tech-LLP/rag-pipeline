@@ -26,6 +26,17 @@ def add_to_knowledge_base_impl(url: str) -> str:
     return format_ingest_reply(result)
 
 
+def get_mcp_shared_token() -> str:
+    token = os.getenv("MCP_SHARED_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("MCP_SHARED_TOKEN is not set in .env")
+    return token
+
+
+def get_mcp_public_url() -> str:
+    return os.getenv("MCP_PUBLIC_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+
+
 def pin_working_directory() -> None:
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 

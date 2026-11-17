@@ -1,11 +1,38 @@
 from unittest.mock import patch, call, MagicMock
 
+import pytest
+
 from mcp_server import (
     search_knowledge_base_impl,
     pin_working_directory,
     warmup_models,
     add_to_knowledge_base_impl,
 )
+
+
+def test_get_mcp_shared_token_missing_raises(monkeypatch):
+    from mcp_server import get_mcp_shared_token
+    monkeypatch.delenv("MCP_SHARED_TOKEN", raising=False)
+    with pytest.raises(RuntimeError):
+        get_mcp_shared_token()
+
+
+def test_get_mcp_shared_token_present_returns_value(monkeypatch):
+    from mcp_server import get_mcp_shared_token
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
+    assert get_mcp_shared_token() == "secret123"
+
+
+def test_get_mcp_public_url_defaults_to_localhost(monkeypatch):
+    from mcp_server import get_mcp_public_url
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+    assert get_mcp_public_url() == "http://localhost:8000"
+
+
+def test_get_mcp_public_url_respects_env_override(monkeypatch):
+    from mcp_server import get_mcp_public_url
+    monkeypatch.setenv("MCP_PUBLIC_URL", "http://203.0.113.5:8000")
+    assert get_mcp_public_url() == "http://203.0.113.5:8000"
 
 
 def test_search_passes_question_and_filters_through():
