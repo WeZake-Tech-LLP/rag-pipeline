@@ -345,7 +345,11 @@ def _extract_via_jina_or_meta(url: str, platform_label: str):
         response = requests.get(jina_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         text = response.text.strip()
         if response.status_code == 200 and len(text) > 200 and not _is_jina_error_response(text):
-            return text, "full_text", None
+            return (
+                _append_linked_content(text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())),
+                "full_text",
+                None,
+            )
     except Exception:
         pass
 
@@ -361,7 +365,13 @@ def _extract_via_jina_or_meta(url: str, platform_label: str):
         if desc:
             text += desc.get("content", "")
         if len(text.strip()) > 50:
-            return text.strip(), "meta_only", None
+            return (
+                _append_linked_content(
+                    text.strip(), exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())
+                ),
+                "meta_only",
+                None,
+            )
     except Exception:
         pass
 
@@ -436,6 +446,12 @@ _PLATFORM_HOSTS = {
     "facebook.com", "fb.com",
     "instagram.com",
     "github.com",
+}
+
+_PLATFORM_LABEL_HOSTS = {
+    "LinkedIn": frozenset({"linkedin.com", "lnkd.in"}),
+    "Facebook": frozenset({"facebook.com", "fb.com"}),
+    "Instagram": frozenset({"instagram.com"}),
 }
 
 _SHARE_PATH_MARKERS = ("/intent/", "/share", "sharer", "sharearticle", "/submit")

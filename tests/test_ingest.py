@@ -1,5 +1,13 @@
 from unittest.mock import MagicMock, patch
-from ingest import format_ingest_reply, _find_platform_urls, _append_linked_content, extract_article
+from ingest import (
+    format_ingest_reply,
+    _find_platform_urls,
+    _append_linked_content,
+    extract_article,
+    extract_linkedin,
+    extract_facebook,
+    extract_instagram,
+)
 
 
 def test_format_ingest_reply_success():
@@ -166,6 +174,58 @@ def test_append_linked_content_passes_exclude_hosts_through():
         result = _append_linked_content(text, exclude_hosts=frozenset({"linkedin.com"}))
     mock_fetch.assert_called_once_with("https://github.com/real/repo")
     assert "Flask README text" in result
+
+
+def test_extract_linkedin_excludes_links_to_other_linkedin_posts():
+    jina_response = MagicMock(status_code=200, text=(
+        "x" * 250 + " https://www.linkedin.com/posts/other-person_123 "
+        "https://github.com/real/repo"
+    ))
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_linkedin("https://www.linkedin.com/posts/my-post_456")
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in text
+
+
+def test_extract_facebook_excludes_links_to_other_facebook_posts():
+    jina_response = MagicMock(status_code=200, text=(
+        "x" * 250 + " https://www.facebook.com/someone/posts/789 "
+        "https://github.com/real/repo"
+    ))
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_facebook("https://www.facebook.com/someone/posts/123")
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in text
+
+
+def test_extract_instagram_excludes_links_to_other_instagram_posts():
+    jina_response = MagicMock(status_code=200, text=(
+        "x" * 250 + " https://www.instagram.com/p/other123/ "
+        "https://github.com/real/repo"
+    ))
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_instagram("https://www.instagram.com/p/my456/")
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in text
+
+
+def test_extract_via_jina_or_meta_applies_link_following_on_meta_fallback():
+    jina_response = MagicMock(status_code=500, text="error")
+    html = (
+        '<html><head><meta property="og:title" content="A LinkedIn Post">'
+        '<meta property="og:description" content="' + ("y" * 60) + '"></head></html>'
+    )
+    fallback_response = MagicMock(status_code=200, text=html)
+    with patch("ingest.requests.get", side_effect=[jina_response, fallback_response]), \
+         patch("ingest._append_linked_content", return_value="EXPANDED") as mock_append:
+        text, quality, error = extract_linkedin("https://www.linkedin.com/posts/my-post_456")
+    mock_append.assert_called_once()
+    assert mock_append.call_args.kwargs.get("exclude_hosts") == frozenset({"linkedin.com", "lnkd.in"})
+    assert text == "EXPANDED"
+    assert quality == "meta_only"
 
 
 def test_extract_article_appends_linked_content_on_jina_success():
