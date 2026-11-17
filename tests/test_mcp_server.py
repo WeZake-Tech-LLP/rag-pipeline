@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import patch, call, MagicMock
 
 import pytest
@@ -33,6 +34,42 @@ def test_get_mcp_public_url_respects_env_override(monkeypatch):
     from mcp_server import get_mcp_public_url
     monkeypatch.setenv("MCP_PUBLIC_URL", "http://203.0.113.5:8000")
     assert get_mcp_public_url() == "http://203.0.113.5:8000"
+
+
+def test_verify_token_accepts_correct_shared_token(monkeypatch):
+    from mcp_server import SharedTokenVerifier
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
+    result = asyncio.run(SharedTokenVerifier().verify_token("secret123"))
+    assert result is not None
+    assert result.token == "secret123"
+
+
+def test_verify_token_rejects_wrong_token(monkeypatch):
+    from mcp_server import SharedTokenVerifier
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
+    result = asyncio.run(SharedTokenVerifier().verify_token("wrong"))
+    assert result is None
+
+
+def test_verify_token_rejects_truncated_token(monkeypatch):
+    from mcp_server import SharedTokenVerifier
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
+    result = asyncio.run(SharedTokenVerifier().verify_token("secret12"))
+    assert result is None
+
+
+def test_verify_token_rejects_token_with_trailing_whitespace(monkeypatch):
+    from mcp_server import SharedTokenVerifier
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
+    result = asyncio.run(SharedTokenVerifier().verify_token("secret123\n"))
+    assert result is None
+
+
+def test_verify_token_fails_closed_when_not_configured(monkeypatch):
+    from mcp_server import SharedTokenVerifier
+    monkeypatch.delenv("MCP_SHARED_TOKEN", raising=False)
+    result = asyncio.run(SharedTokenVerifier().verify_token("anything"))
+    assert result is None
 
 
 def test_search_passes_question_and_filters_through():

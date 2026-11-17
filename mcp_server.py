@@ -3,6 +3,7 @@
 import os
 import threading
 
+from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver import MCPServer
 
 # `ingest`/`query` are imported lazily, inside each function, rather than
@@ -35,6 +36,17 @@ def get_mcp_shared_token() -> str:
 
 def get_mcp_public_url() -> str:
     return os.getenv("MCP_PUBLIC_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+
+
+class SharedTokenVerifier:
+    async def verify_token(self, token: str) -> AccessToken | None:
+        try:
+            expected = get_mcp_shared_token()
+        except RuntimeError:
+            return None
+        if token != expected:
+            return None
+        return AccessToken(token=token, client_id="shared-user", scopes=[])
 
 
 def pin_working_directory() -> None:
