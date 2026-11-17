@@ -436,7 +436,9 @@ _REDIRECTOR_NETWORK_HOSTS = frozenset({"t.co", "lnkd.in"})
 _REDIRECTOR_QUERY_PARAM_HOSTS = frozenset({"l.facebook.com", "l.instagram.com"})
 
 
-def _resolve_redirector(url: str) -> str:
+def _decode_query_param_redirector(url: str) -> str:
+    # No network call — these wrappers carry the real destination
+    # directly in a query parameter.
     from urllib.parse import urlsplit, parse_qs
 
     parts = urlsplit(url)
@@ -447,6 +449,24 @@ def _resolve_redirector(url: str) -> str:
         target = parse_qs(parts.query).get("u", [None])[0]
         return target if target else url
 
+    if normalized == "linkedin.com" and parts.path == "/safety/go":
+        target = parse_qs(parts.query).get("url", [None])[0]
+        return target if target else url
+
+    return url
+
+
+def _resolve_redirector(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    decoded = _decode_query_param_redirector(url)
+    if decoded != url:
+        return decoded
+
+    parts = urlsplit(url)
+    host = parts.netloc.lower()
+    normalized = host[4:] if host.startswith("www.") else host
+
     if normalized in _REDIRECTOR_NETWORK_HOSTS:
         try:
             response = requests.get(
@@ -455,7 +475,13 @@ def _resolve_redirector(url: str) -> str:
             )
             resolved = response.url
             response.close()
-            return resolved if resolved and resolved != url else url
+            if resolved and resolved != url:
+                # The network redirect may itself land on another
+                # query-param wrapper (e.g. lnkd.in -> linkedin.com's
+                # own safety interstitial) — unwrap that too, still
+                # without a second network call.
+                return _decode_query_param_redirector(resolved)
+            return url
         except Exception:
             return url
 

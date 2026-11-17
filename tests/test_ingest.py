@@ -243,6 +243,21 @@ def test_resolve_redirector_follows_network_redirect_for_tco():
     assert result == "https://github.com/real/repo"
 
 
+def test_resolve_redirector_decodes_linkedin_safety_go_interstitial():
+    wrapped = "https://www.linkedin.com/safety/go?url=https%3A%2F%2Fnytimes.com%2Farticle&urlhash=abc"
+    assert _resolve_redirector(wrapped) == "https://nytimes.com/article"
+
+
+def test_resolve_redirector_decodes_safety_go_reached_via_lnkdin_redirect():
+    fake_response = MagicMock()
+    fake_response.url = "https://www.linkedin.com/safety/go?url=https%3A%2F%2Fnytimes.com%2Farticle&urlhash=abc"
+    fake_response.close = MagicMock()
+    with patch("ingest.requests.get", return_value=fake_response) as mock_get:
+        result = _resolve_redirector("https://lnkd.in/abc123")
+    mock_get.assert_called_once()
+    assert result == "https://nytimes.com/article"
+
+
 def test_resolve_redirector_degrades_safely_on_network_failure():
     with patch("ingest.requests.get", side_effect=Exception("boom")):
         result = _resolve_redirector("https://t.co/abc123")
