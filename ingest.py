@@ -269,9 +269,17 @@ def extract_youtube(url: str, follow_links: bool = True):
 
 _MARKDOWN_IMAGE_PATTERN = re.compile(r"!?\[Image\s+\d+[^\]]*\]\([^)]+\)")
 _GENERIC_MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+# A badge (e.g. CI/coverage/PyPI) is a markdown image wrapped in a link:
+# [![alt](img-url)](target-url). Stripping only the inner image leaves an
+# orphaned [](target-url), so the badge's target still gets scanned as if
+# it were a real link — strip the whole wrapper instead.
+_BADGE_LINK_PATTERN = re.compile(r"\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)")
+_HTML_IMG_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 
 
 def _strip_image_markdown(text: str) -> str:
+    text = _BADGE_LINK_PATTERN.sub("", text)
+    text = _HTML_IMG_TAG_PATTERN.sub("", text)
     text = _MARKDOWN_IMAGE_PATTERN.sub("", text)
     text = _GENERIC_MARKDOWN_IMAGE_PATTERN.sub("", text)
     return text
@@ -451,12 +459,21 @@ def _decode_query_param_redirector(url: str) -> str:
     host = parts.netloc.lower()
     normalized = host[4:] if host.startswith("www.") else host
 
+    def _as_http_target(raw):
+        # Reject anything that isn't a real http(s) URL — e.g. a
+        # javascript: scheme smuggled into the query param — rather than
+        # handing it on to be fetched.
+        if raw and raw.startswith(("http://", "https://")):
+            return raw
+        return None
+
     if normalized in _REDIRECTOR_QUERY_PARAM_HOSTS:
-        target = parse_qs(parts.query).get("u", [None])[0]
+        target = _as_http_target(parse_qs(parts.query).get("u", [None])[0])
         return target if target else url
 
-    if normalized == "linkedin.com" and parts.path == "/safety/go":
-        target = parse_qs(parts.query).get("url", [None])[0]
+    is_linkedin_host = normalized == "linkedin.com" or normalized.endswith(".linkedin.com")
+    if is_linkedin_host and parts.path.rstrip("/") == "/safety/go":
+        target = _as_http_target(parse_qs(parts.query).get("url", [None])[0])
         return target if target else url
 
     return url
@@ -494,6 +511,36 @@ def _resolve_redirector(url: str) -> str:
     return url
 
 _SHARE_PATH_MARKERS = ("/intent/", "/share", "sharer", "sharearticle", "/submit")
+
+# Hosts that are never the actual content a post is pointing to, so they're
+# excluded regardless of allow_any_host — badge/CI/registry targets (what a
+# README badge links to), image/CDN hosts, and sponsor/community links.
+_NOISE_HOSTS = frozenset({
+    "shields.io", "badge.fury.io", "codecov.io", "coveralls.io",
+    "travis-ci.org", "travis-ci.com", "circleci.com",
+    "pypi.org", "npmjs.com", "opensource.org",
+    "githubusercontent.com",
+    "patreon.com", "ko-fi.com", "buymeacoffee.com",
+    "discord.gg", "discord.com", "linktr.ee",
+})
+
+# A bare profile link (one path segment, e.g. twitter.com/someone) is never
+# the post's actual subject — unlike a post/status link (multiple segments),
+# which is real content.
+_BARE_PROFILE_HOSTS = frozenset({"twitter.com", "x.com", "instagram.com", "facebook.com", "fb.com"})
+
+
+def _is_noise_host(host: str) -> bool:
+    normalized = host[4:] if host.startswith("www.") else host
+    return any(normalized == d or normalized.endswith("." + d) for d in _NOISE_HOSTS)
+
+
+def _is_bare_profile_link(host: str, path: str) -> bool:
+    normalized = host[4:] if host.startswith("www.") else host
+    if not any(normalized == d or normalized.endswith("." + d) for d in _BARE_PROFILE_HOSTS):
+        return False
+    segment = path.strip("/")
+    return bool(segment) and "/" not in segment
 
 
 def _is_platform_host(host: str) -> bool:
@@ -539,7 +586,8 @@ def _find_platform_urls(
             continue
         if any(marker in candidate.lower() for marker in _SHARE_PATH_MARKERS):
             continue
-        host = urlsplit(candidate).netloc.lower()
+        candidate_parts = urlsplit(candidate)
+        host = candidate_parts.netloc.lower()
         normalized_host = host[4:] if host.startswith("www.") else host
         if any(normalized_host == d or normalized_host.endswith("." + d) for d in exclude_hosts):
             continue
@@ -547,6 +595,8 @@ def _find_platform_urls(
         # a bare redirector link is never real content on its own, so
         # this is excluded regardless of allow_any_host.
         if normalized_host in _REDIRECTOR_NETWORK_HOSTS:
+            continue
+        if _is_noise_host(host) or _is_bare_profile_link(host, candidate_parts.path):
             continue
         if not allow_any_host and not _is_platform_host(host):
             continue
@@ -561,10 +611,15 @@ def extract_reddit(url: str, follow_links: bool = True):
 
     ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
-    def _clean_html(raw_html: str) -> str:
+    def _clean_html(raw_html: str):
+        # get_text() discards <a href> targets, keeping only the link's
+        # visible text — return hrefs separately so a hyperlinked (not
+        # bare-pasted) link can still be found and followed.
         if not raw_html:
-            return ""
-        return BeautifulSoup(raw_html, "html.parser").get_text(separator=" ", strip=True)
+            return "", []
+        soup = BeautifulSoup(raw_html, "html.parser")
+        hrefs = [a.get("href") for a in soup.find_all("a", href=True) if a.get("href")]
+        return soup.get_text(separator=" ", strip=True), hrefs
 
     try:
         _throttle_reddit_request()
@@ -601,7 +656,7 @@ def extract_reddit(url: str, follow_links: bool = True):
         post_author_el = post_entry.find("atom:author/atom:name", ATOM_NS)
         post_author = post_author_el.text.strip() if post_author_el is not None and post_author_el.text else ""
         post_content_el = post_entry.find("atom:content", ATOM_NS)
-        post_text = _clean_html(post_content_el.text if post_content_el is not None else "")
+        post_text, href_urls = _clean_html(post_content_el.text if post_content_el is not None else "")
 
         parts = [f"Title: {feed_title}", f"Author: {post_author}"]
         if post_text:
@@ -612,7 +667,8 @@ def extract_reddit(url: str, follow_links: bool = True):
             author_el = entry.find("atom:author/atom:name", ATOM_NS)
             author = author_el.text.strip() if author_el is not None and author_el.text else "unknown"
             content_el = entry.find("atom:content", ATOM_NS)
-            body = _clean_html(content_el.text if content_el is not None else "")
+            body, comment_hrefs = _clean_html(content_el.text if content_el is not None else "")
+            href_urls.extend(comment_hrefs)
             if not body:
                 continue
             comment_lines.append(f"- {author}: {body}")
@@ -624,7 +680,10 @@ def extract_reddit(url: str, follow_links: bool = True):
         if len(text) > 50:
             if follow_links:
                 text = _append_linked_content(
-                    text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("Reddit", frozenset()), allow_any_host=True
+                    text,
+                    extra_scan_text=" ".join(href_urls),
+                    exclude_hosts=_PLATFORM_LABEL_HOSTS.get("Reddit", frozenset()),
+                    allow_any_host=True,
                 )
             return text, "reddit_rss", None
 
@@ -683,8 +742,8 @@ def extract_github(url: str, follow_links: bool = True):
 def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
     """Dispatch to the right extractor for a detected type.
 
-    `follow_links` is passed through to extractors that can themselves
-    follow a link found inside a post (X, Reddit); it's set False when
+    `follow_links` is passed through to every extractor, each of which can
+    itself follow a link found inside its content; it's set False when
     this is itself being called to fetch a *linked* piece of content, so
     following never recurses more than one level deep.
     """

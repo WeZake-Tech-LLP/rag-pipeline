@@ -501,13 +501,18 @@ def _youtube_description_fallback_mocks(description):
 
 
 def test_extract_youtube_follows_link_in_description_fallback():
-    # Strategy 1 (youtube_transcript_api) fails naturally here — the
-    # installed version doesn't have list_transcripts at all, so this
-    # always falls through via AttributeError, same as in production.
+    # Strategy 1 (youtube_transcript_api) is forced to fail explicitly —
+    # the installed version happens to lack list_transcripts entirely, but
+    # the test must not silently depend on that library bug staying put.
     mock_ydl = _youtube_description_fallback_mocks(
         "Check out the full write-up at https://nytimes.com/2026/article " + "x" * 200
     )
-    with patch("ingest.requests.get", side_effect=Exception("jina failed")), \
+    with patch(
+             "youtube_transcript_api.YouTubeTranscriptApi.list_transcripts",
+             side_effect=Exception("strategy 1 forced to fail"),
+             create=True,
+         ), \
+         patch("ingest.requests.get", side_effect=Exception("jina failed")), \
          patch("glob.glob", return_value=[]), \
          patch("yt_dlp.YoutubeDL", return_value=mock_ydl), \
          patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
@@ -521,7 +526,12 @@ def test_extract_youtube_does_not_follow_links_when_follow_links_false():
     mock_ydl = _youtube_description_fallback_mocks(
         "Check out the full write-up at https://nytimes.com/2026/article " + "x" * 200
     )
-    with patch("ingest.requests.get", side_effect=Exception("jina failed")), \
+    with patch(
+             "youtube_transcript_api.YouTubeTranscriptApi.list_transcripts",
+             side_effect=Exception("strategy 1 forced to fail"),
+             create=True,
+         ), \
+         patch("ingest.requests.get", side_effect=Exception("jina failed")), \
          patch("glob.glob", return_value=[]), \
          patch("yt_dlp.YoutubeDL", return_value=mock_ydl), \
          patch("ingest._fetch_linked_content") as mock_fetch:
@@ -765,4 +775,198 @@ def test_extract_reddit_follows_link_to_a_plain_article():
          patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
         text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
     mock_fetch.assert_called_once_with("https://www.theverge.com/2026/article")
+    assert "Article text" in text
+
+
+_REDDIT_ATOM_XML_HREF_ONLY_LINK = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Post Title</title>
+  <entry>
+    <author><name>poster</name></author>
+    <content type="html">Check out &lt;a href="https://nytimes.com/2026/article"&gt;this write-up&lt;/a&gt; I found.</content>
+  </entry>
+</feed>"""
+
+
+def test_extract_reddit_follows_hyperlinked_text_link_with_no_bare_url():
+    # _clean_html's get_text() discards <a href> targets, keeping only
+    # the link's visible text ("this write-up") — a link that's never
+    # pasted as a bare URL would otherwise be invisible to the scanner.
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=_REDDIT_ATOM_XML_HREF_ONLY_LINK.encode())
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    mock_fetch.assert_called_once_with("https://nytimes.com/2026/article")
+    assert "Article text" in text
+    assert "https://nytimes.com/2026/article" not in text.split("Linked Content:")[0]
+
+
+_REDDIT_ATOM_XML_HREF_ONLY_IN_COMMENT = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Post Title</title>
+  <entry>
+    <author><name>poster</name></author>
+    <content type="html">Just a plain post with no links.</content>
+  </entry>
+  <entry>
+    <author><name>commenter</name></author>
+    <content type="html">See &lt;a href="https://nytimes.com/2026/article"&gt;here&lt;/a&gt;.</content>
+  </entry>
+</feed>"""
+
+
+def test_extract_reddit_follows_hyperlinked_text_link_found_only_in_a_comment():
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=_REDDIT_ATOM_XML_HREF_ONLY_IN_COMMENT.encode())
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    mock_fetch.assert_called_once_with("https://nytimes.com/2026/article")
+    assert "Article text" in text
+
+
+def test_find_platform_urls_skips_badge_and_cdn_noise_hosts():
+    text = (
+        "[![Build](https://img.shields.io/badge.svg)](https://travis-ci.com/real/repo) "
+        '<img src="https://raw.githubusercontent.com/real/repo/main/logo.png"> '
+        "Docs: https://proj.readthedocs.io/"
+    )
+    result = _find_platform_urls(text, exclude_hosts=frozenset({"github.com"}), allow_any_host=True)
+    assert result == ["https://proj.readthedocs.io/"]
+
+
+def test_find_platform_urls_skips_bare_social_profile_links():
+    text = (
+        "Sponsored by https://www.patreon.com/mychannel and "
+        "follow https://twitter.com/mychannel — full paper: "
+        "https://arxiv.org/abs/1234.5678"
+    )
+    result = _find_platform_urls(text, allow_any_host=True)
+    assert result == ["https://arxiv.org/abs/1234.5678"]
+
+
+def test_find_platform_urls_still_follows_real_social_posts_not_just_profiles():
+    # A profile link (one path segment) is noise; a post/status link
+    # (multiple segments) is real content and must still be followed.
+    text = "https://twitter.com/mychannel/status/42"
+    result = _find_platform_urls(text, allow_any_host=True)
+    assert result == ["https://twitter.com/mychannel/status/42"]
+
+
+def test_extract_github_prefers_docs_link_over_badge_and_cdn_noise():
+    readme = (
+        "[![Build](https://img.shields.io/badge.svg)](https://travis-ci.com/real/repo)\n"
+        '<img src="https://raw.githubusercontent.com/real/repo/main/logo.png">\n'
+        "Docs: https://proj.readthedocs.io/"
+    )
+    repo_response, readme_response = _github_responses(readme)
+    with patch("ingest.requests.get", side_effect=[repo_response, readme_response]), \
+         patch("ingest._fetch_linked_content", return_value="Docs text") as mock_fetch:
+        text, quality, error = extract_github("https://github.com/real/repo")
+    mock_fetch.assert_called_once_with("https://proj.readthedocs.io/")
+    assert "Docs text" in text
+
+
+def test_extract_youtube_description_fallback_skips_sponsor_and_profile_noise():
+    mock_ydl = _youtube_description_fallback_mocks(
+        "Sponsored by https://www.patreon.com/mychannel. Follow "
+        "https://twitter.com/mychannel. Full paper: "
+        "https://arxiv.org/abs/1234.5678 " + "x" * 200
+    )
+    with patch("ingest.requests.get", side_effect=Exception("jina failed")), \
+         patch("glob.glob", return_value=[]), \
+         patch("yt_dlp.YoutubeDL", return_value=mock_ydl), \
+         patch(
+             "youtube_transcript_api.YouTubeTranscriptApi.list_transcripts",
+             side_effect=Exception("strategy 1 forced to fail"),
+             create=True,
+         ), \
+         patch("ingest._fetch_linked_content", return_value="Paper text") as mock_fetch:
+        text, quality, error = extract_youtube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    mock_fetch.assert_called_once_with("https://arxiv.org/abs/1234.5678")
+    assert "Paper text" in text
+
+
+def test_extract_youtube_never_scans_links_on_transcript_api_success_path():
+    fetched = [{"text": "word " * 60}]
+    mock_transcript = MagicMock()
+    mock_transcript.fetch.return_value = fetched
+    mock_transcript_list = MagicMock()
+    mock_transcript_list.find_manually_created_transcript.return_value = mock_transcript
+    with patch(
+        "youtube_transcript_api.YouTubeTranscriptApi.list_transcripts",
+        return_value=mock_transcript_list,
+        create=True,
+    ), patch("ingest._append_linked_content") as mock_append:
+        text, quality, error = extract_youtube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert quality == "transcript"
+    mock_append.assert_not_called()
+
+
+def test_extract_youtube_never_scans_links_on_jina_path():
+    jina_response = MagicMock(
+        status_code=200,
+        text="\n".join([("meaningful line " * 5) for _ in range(6)]),
+    )
+    with patch(
+        "youtube_transcript_api.YouTubeTranscriptApi.list_transcripts",
+        side_effect=Exception("strategy 1 forced to fail"),
+        create=True,
+    ), patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._append_linked_content") as mock_append:
+        text, quality, error = extract_youtube("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert quality == "jina_extract"
+    mock_append.assert_not_called()
+
+
+def test_fetch_linked_content_does_not_recurse_through_youtube():
+    mock_ydl = _youtube_description_fallback_mocks("x" * 250)
+    with patch("ingest.requests.get", side_effect=Exception("jina failed")), \
+         patch("glob.glob", return_value=[]), \
+         patch("yt_dlp.YoutubeDL", return_value=mock_ydl), \
+         patch(
+             "youtube_transcript_api.YouTubeTranscriptApi.list_transcripts",
+             side_effect=Exception("strategy 1 forced to fail"),
+             create=True,
+         ), \
+         patch("ingest._append_linked_content") as mock_append:
+        _fetch_linked_content("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    mock_append.assert_not_called()
+
+
+def test_resolve_redirector_degrades_safely_on_lnkd_in_network_failure():
+    with patch("ingest.requests.get", side_effect=Exception("boom")):
+        result = _resolve_redirector("https://lnkd.in/abc123")
+    assert result == "https://lnkd.in/abc123"
+
+
+def test_decode_query_param_redirector_rejects_non_http_scheme_target():
+    wrapped = "https://www.linkedin.com/safety/go?url=javascript%3Aalert(1)&urlhash=abc"
+    assert _resolve_redirector(wrapped) == wrapped
+
+
+def test_decode_query_param_redirector_handles_safety_go_trailing_slash():
+    wrapped = "https://www.linkedin.com/safety/go/?url=https%3A%2F%2Fnytimes.com%2Farticle&urlhash=abc"
+    assert _resolve_redirector(wrapped) == "https://nytimes.com/article"
+
+
+def test_decode_query_param_redirector_handles_regional_linkedin_host():
+    wrapped = "https://in.linkedin.com/safety/go?url=https%3A%2F%2Fnytimes.com%2Farticle&urlhash=abc"
+    assert _resolve_redirector(wrapped) == "https://nytimes.com/article"
+
+
+def test_extract_linkedin_follows_link_reached_through_safety_go_interstitial():
+    jina_response = MagicMock(status_code=200, text=(
+        "x" * 250 + " https://www.linkedin.com/safety/go?url="
+        "https%3A%2F%2Fnytimes.com%2F2026%2Farticle&urlhash=abc"
+    ))
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_linkedin("https://www.linkedin.com/posts/my-post_456")
+    mock_fetch.assert_called_once_with("https://nytimes.com/2026/article")
     assert "Article text" in text
