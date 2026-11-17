@@ -402,34 +402,10 @@ def extract_x(url: str, follow_links: bool = True):
     except Exception as e:
         return None, "failed", f"X/Twitter extraction failed: {e}"
 
-    parts = [text]
-
-    # If the post links to something (via a t.co short link), resolve it
-    # and fetch the full content with whichever extractor actually fits
-    # it (article, YouTube, Reddit, ...) instead of just the headline
-    # Jina's rendering already shows inline.
     if follow_links:
-        match = re.search(r"https://t\.co/[A-Za-z0-9]+", text)
-        if match:
-            short_url = match.group(0)
-            try:
-                redirect_response = requests.get(
-                    short_url,
-                    timeout=10,
-                    headers={"User-Agent": "Mozilla/5.0"},
-                    allow_redirects=True,
-                    stream=True,
-                )
-                resolved_url = redirect_response.url
-                redirect_response.close()
-                if resolved_url and resolved_url != short_url:
-                    linked_text = _fetch_linked_content(resolved_url)
-                    if linked_text:
-                        parts.append(f"Linked Content:\n{linked_text}")
-            except Exception:
-                pass  # a failed secondary fetch shouldn't fail the whole post
+        text = _append_linked_content(text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("X", frozenset()))
 
-    return "\n\n".join(parts).strip(), "full_text", None
+    return text.strip(), "full_text", None
 
 
 def _find_external_url(text: str) -> Optional[str]:

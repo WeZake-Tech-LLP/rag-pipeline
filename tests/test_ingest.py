@@ -7,6 +7,7 @@ from ingest import (
     extract_linkedin,
     extract_facebook,
     extract_instagram,
+    extract_x,
     _fetch_linked_content,
     _resolve_redirector,
 )
@@ -387,3 +388,34 @@ def test_extract_article_follows_href_links_in_beautifulsoup_fallback():
     mock_fetch.assert_called_once_with("https://github.com/pallets/flask")
     assert "Linked Content: https://github.com/pallets/flask" in text
     assert "Flask README text" in text
+
+
+def test_extract_x_follows_tco_link_resolved_to_github():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://t.co/abc123")
+    resolved_response = MagicMock()
+    resolved_response.url = "https://github.com/real/repo"
+    resolved_response.close = MagicMock()
+    with patch("ingest.requests.get", side_effect=[jina_response, resolved_response]), \
+         patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_x("https://x.com/user/status/123")
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in text
+
+
+def test_extract_x_excludes_links_to_other_x_posts():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://t.co/abc123")
+    resolved_response = MagicMock()
+    resolved_response.url = "https://x.com/other/status/999"
+    resolved_response.close = MagicMock()
+    with patch("ingest.requests.get", side_effect=[jina_response, resolved_response]), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_x("https://x.com/user/status/123")
+    mock_fetch.assert_not_called()
+
+
+def test_extract_x_does_not_follow_links_when_follow_links_false():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://t.co/abc123")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_x("https://x.com/user/status/123", follow_links=False)
+    mock_fetch.assert_not_called()
