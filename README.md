@@ -240,9 +240,24 @@ It listens on `0.0.0.0:8000` and checks every request's
 
 ### 3. Connect Claude Code to it
 
+If you previously registered this server as a local stdio process
+(Claude Code launching `mcp_server.py` itself), remove that registration
+first — it will otherwise try to start the old way and fail, since
+`main()` now requires `MCP_SHARED_TOKEN` and speaks HTTP, not stdio:
+
+```bash
+claude mcp remove rag-knowledge-base
+```
+
+Then add it back pointed at the running server instead:
+
 ```bash
 claude mcp add --transport http rag-knowledge-base <MCP_PUBLIC_URL>/mcp -H "Authorization: Bearer <your_token>"
 ```
+
+Unlike the old stdio setup, Claude Code no longer starts this process
+for you — `python mcp_server.py` has to already be running (even for
+local-only use) before you connect to it.
 
 Share the URL and token with anyone else you want to have the same
 access — same spirit as the Telegram invite link, no install needed on

@@ -3,9 +3,24 @@
 import os
 import threading
 
+from dotenv import load_dotenv
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
+
+# Claude Code can launch this process from any project folder (that's the
+# whole point of pin_working_directory()), so load_dotenv()'s default
+# cwd-search would miss .env entirely unless the process happened to be
+# started from this project's own directory. Point it at this script's own
+# directory explicitly instead of relying on cwd.
+DOTENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+
+
+def _load_env_file() -> None:
+    load_dotenv(dotenv_path=DOTENV_PATH)
+
+
+_load_env_file()
 
 # `ingest`/`query` are imported lazily, inside each function, rather than
 # at module level: they transitively pull in torch/transformers/chromadb

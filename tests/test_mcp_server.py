@@ -11,6 +11,48 @@ from mcp_server import (
 )
 
 
+def test_load_env_file_picks_up_mcp_shared_token(tmp_path, monkeypatch):
+    # The documented setup is "put MCP_SHARED_TOKEN in .env, then run
+    # python mcp_server.py" — this proves that path actually works,
+    # using a real temp .env file through the real loading function,
+    # not just a process env var the way every other test here sets one.
+    import mcp_server
+    env_file = tmp_path / ".env"
+    env_file.write_text("MCP_SHARED_TOKEN=from-dotenv-file\n")
+    monkeypatch.delenv("MCP_SHARED_TOKEN", raising=False)
+    monkeypatch.setattr(mcp_server, "DOTENV_PATH", str(env_file))
+    mcp_server._load_env_file()
+    assert mcp_server.get_mcp_shared_token() == "from-dotenv-file"
+
+
+def test_streamable_http_app_rejects_request_with_no_auth_header(monkeypatch):
+    # A unit-level verify_token() test can't catch a regression where
+    # someone drops auth=/token_verifier= from the server construction
+    # (the real security boundary) — this hits the real ASGI app, the
+    # same way a real client over the network would.
+    from starlette.testclient import TestClient
+    import mcp_server
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
+    app = mcp_server.server.streamable_http_app(host="0.0.0.0")
+    with TestClient(app) as client:
+        response = client.post("/mcp", json={"jsonrpc": "2.0", "method": "initialize", "id": 1})
+    assert response.status_code == 401
+
+
+def test_streamable_http_app_accepts_request_with_correct_token(monkeypatch):
+    from starlette.testclient import TestClient
+    import mcp_server
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
+    app = mcp_server.server.streamable_http_app(host="0.0.0.0")
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "method": "initialize", "id": 1},
+            headers={"Authorization": "Bearer secret123"},
+        )
+    assert response.status_code != 401
+
+
 def test_get_mcp_shared_token_missing_raises(monkeypatch):
     from mcp_server import get_mcp_shared_token
     monkeypatch.delenv("MCP_SHARED_TOKEN", raising=False)
