@@ -403,7 +403,9 @@ def extract_x(url: str, follow_links: bool = True):
         return None, "failed", f"X/Twitter extraction failed: {e}"
 
     if follow_links:
-        text = _append_linked_content(text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("X", frozenset()))
+        text = _append_linked_content(
+            text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("X", frozenset()), allow_any_host=True
+        )
 
     return text.strip(), "full_text", None
 
@@ -473,7 +475,9 @@ def _is_platform_host(host: str) -> bool:
 _MAX_REDIRECTOR_RESOLUTIONS = 8
 
 
-def _find_platform_urls(text: str, max_links: int = 4, exclude_hosts: frozenset = frozenset()) -> List[str]:
+def _find_platform_urls(
+    text: str, max_links: int = 4, exclude_hosts: frozenset = frozenset(), allow_any_host: bool = False
+) -> List[str]:
     from urllib.parse import urlsplit
 
     stripped = _strip_image_markdown(text)
@@ -503,7 +507,12 @@ def _find_platform_urls(text: str, max_links: int = 4, exclude_hosts: frozenset 
         normalized_host = host[4:] if host.startswith("www.") else host
         if any(normalized_host == d or normalized_host.endswith("." + d) for d in exclude_hosts):
             continue
-        if not _is_platform_host(host):
+        # Still on a wrapper host means resolution failed or never ran —
+        # a bare redirector link is never real content on its own, so
+        # this is excluded regardless of allow_any_host.
+        if normalized_host in _REDIRECTOR_NETWORK_HOSTS:
+            continue
+        if not allow_any_host and not _is_platform_host(host):
             continue
         found.append(candidate)
         if len(found) >= max_links:
@@ -578,7 +587,9 @@ def extract_reddit(url: str, follow_links: bool = True):
         text = "\n\n".join(parts).strip()
         if len(text) > 50:
             if follow_links:
-                text = _append_linked_content(text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("Reddit", frozenset()))
+                text = _append_linked_content(
+                    text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("Reddit", frozenset()), allow_any_host=True
+                )
             return text, "reddit_rss", None
 
         return None, "failed", "Reddit post had no usable content"
@@ -666,7 +677,11 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
 
 
 def _append_linked_content(
-    text: str, max_links: int = 4, extra_scan_text: str = "", exclude_hosts: frozenset = frozenset()
+    text: str,
+    max_links: int = 4,
+    extra_scan_text: str = "",
+    exclude_hosts: frozenset = frozenset(),
+    allow_any_host: bool = False,
 ) -> str:
     # extra_scan_text lets a caller feed in links that don't appear as
     # bare URLs in `text` itself (e.g. <a href> targets BeautifulSoup's
@@ -674,7 +689,9 @@ def _append_linked_content(
     # stored/returned content.
     scan_text = f"{text} {extra_scan_text}" if extra_scan_text else text
     result = text
-    for url in _find_platform_urls(scan_text, max_links=max_links, exclude_hosts=exclude_hosts):
+    for url in _find_platform_urls(
+        scan_text, max_links=max_links, exclude_hosts=exclude_hosts, allow_any_host=allow_any_host
+    ):
         content = _fetch_linked_content(url)
         if content:
             result += f"\n\nLinked Content: {url}\n{content}"

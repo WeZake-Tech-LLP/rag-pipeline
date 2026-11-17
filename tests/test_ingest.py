@@ -302,6 +302,29 @@ def test_find_platform_urls_caps_total_wrapper_resolution_attempts():
     assert result == []
 
 
+def test_find_platform_urls_allow_any_host_includes_non_platform_links():
+    text = "https://example.com/faq https://nytimes.com/2026/article"
+    assert _find_platform_urls(text) == []
+    assert _find_platform_urls(text, allow_any_host=True) == [
+        "https://example.com/faq",
+        "https://nytimes.com/2026/article",
+    ]
+
+
+def test_find_platform_urls_allow_any_host_still_excludes_share_buttons():
+    text = "https://twitter.com/intent/tweet?text=hi https://nytimes.com/2026/article"
+    result = _find_platform_urls(text, allow_any_host=True)
+    assert result == ["https://nytimes.com/2026/article"]
+
+
+def test_find_platform_urls_allow_any_host_still_excludes_same_platform():
+    text = "https://x.com/other/status/999 https://nytimes.com/2026/article"
+    result = _find_platform_urls(
+        text, allow_any_host=True, exclude_hosts=frozenset({"x.com", "twitter.com"})
+    )
+    assert result == ["https://nytimes.com/2026/article"]
+
+
 def test_extract_via_jina_or_meta_applies_link_following_on_meta_fallback():
     jina_response = MagicMock(status_code=500, text="error")
     html = (
@@ -470,6 +493,21 @@ def test_extract_x_still_follows_the_link_that_resolves_when_another_fails():
     assert "Flask README text" in text
 
 
+def test_extract_x_follows_tco_link_resolved_to_a_plain_article():
+    # The single most common real-world case: a tweet sharing a news
+    # article. The old code followed any resolved destination; the
+    # shared platform-only pipeline must not narrow that away.
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://t.co/abc123")
+    resolved_response = MagicMock()
+    resolved_response.url = "https://www.nytimes.com/2026/article"
+    resolved_response.close = MagicMock()
+    with patch("ingest.requests.get", side_effect=[jina_response, resolved_response]), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_x("https://x.com/user/status/123")
+    mock_fetch.assert_called_once_with("https://www.nytimes.com/2026/article")
+    assert "Article text" in text
+
+
 def test_extract_x_excludes_links_to_other_x_posts():
     jina_response = MagicMock(status_code=200, text="x" * 250 + " https://t.co/abc123")
     resolved_response = MagicMock()
@@ -583,3 +621,22 @@ def test_extract_reddit_excludes_short_link_resolving_to_another_reddit_post():
          patch("ingest._fetch_linked_content") as mock_fetch:
         text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
     mock_fetch.assert_not_called()
+
+
+def test_extract_reddit_follows_link_to_a_plain_article():
+    # The single most common real-world case for a Reddit link-post:
+    # a bare link to a news/blog article. The old code followed any
+    # non-reddit URL; the shared platform-only pipeline must not
+    # narrow that away.
+    xml = _REDDIT_ATOM_XML.replace(
+        "https://github.com/real/repo", "https://www.theverge.com/2026/article"
+    )
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=xml.encode())
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    mock_fetch.assert_called_once_with("https://www.theverge.com/2026/article")
+    assert "Article text" in text
