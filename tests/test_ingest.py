@@ -437,6 +437,39 @@ def test_extract_x_follows_tco_link_resolved_to_github():
     assert "Flask README text" in text
 
 
+def test_extract_x_follows_multiple_tco_links():
+    jina_response = MagicMock(
+        status_code=200, text="x" * 250 + " https://t.co/abc123 https://t.co/def456"
+    )
+    resolved_github = MagicMock()
+    resolved_github.url = "https://github.com/real/repo"
+    resolved_github.close = MagicMock()
+    resolved_youtube = MagicMock()
+    resolved_youtube.url = "https://www.youtube.com/watch?v=abc"
+    resolved_youtube.close = MagicMock()
+    with patch("ingest.requests.get", side_effect=[jina_response, resolved_github, resolved_youtube]), \
+         patch("ingest._fetch_linked_content", side_effect=["Flask README text", "Video transcript"]) as mock_fetch:
+        text, quality, error = extract_x("https://x.com/user/status/123")
+    assert mock_fetch.call_count == 2
+    assert "Flask README text" in text and "Video transcript" in text
+
+
+def test_extract_x_still_follows_the_link_that_resolves_when_another_fails():
+    jina_response = MagicMock(
+        status_code=200, text="x" * 250 + " https://t.co/abc123 https://t.co/def456"
+    )
+    resolved_github = MagicMock()
+    resolved_github.url = "https://github.com/real/repo"
+    resolved_github.close = MagicMock()
+    with patch(
+        "ingest.requests.get",
+        side_effect=[jina_response, Exception("resolution timed out"), resolved_github],
+    ), patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_x("https://x.com/user/status/123")
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in text
+
+
 def test_extract_x_excludes_links_to_other_x_posts():
     jina_response = MagicMock(status_code=200, text="x" * 250 + " https://t.co/abc123")
     resolved_response = MagicMock()
