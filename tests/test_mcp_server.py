@@ -107,12 +107,25 @@ def test_pin_working_directory_chdirs_to_script_location():
     mock_chdir.assert_called_once_with(expected)
 
 
-def test_main_pins_cwd_then_runs_without_waiting_for_warmup():
+def test_main_fails_fast_when_shared_token_not_configured(monkeypatch):
+    import mcp_server
+    monkeypatch.delenv("MCP_SHARED_TOKEN", raising=False)
+    with patch("mcp_server.pin_working_directory"), \
+         patch("mcp_server.threading.Thread") as mock_thread_cls, \
+         patch.object(mcp_server.server, "run") as mock_run:
+        with pytest.raises(RuntimeError):
+            mcp_server.main()
+    mock_thread_cls.assert_not_called()
+    mock_run.assert_not_called()
+
+
+def test_main_pins_cwd_then_runs_without_waiting_for_warmup(monkeypatch):
     # warmup_models() takes ~30s (loads torch/transformers/reranker/Groq
     # client); if main() waited for it before server.run(), the MCP
     # client's connection handshake would time out before the server
     # even starts listening. Warmup must run in a background thread so
     # server.run() is reached immediately.
+    monkeypatch.setenv("MCP_SHARED_TOKEN", "secret123")
     import mcp_server
     manager = MagicMock()
     with patch("mcp_server.pin_working_directory", manager.pin), \
@@ -124,7 +137,7 @@ def test_main_pins_cwd_then_runs_without_waiting_for_warmup():
     manager.pin.assert_called_once()
     mock_thread_cls.assert_called_once_with(target=mcp_server.warmup_models, daemon=True)
     mock_thread_instance.start.assert_called_once()
-    manager.run.assert_called_once()
+    manager.run.assert_called_once_with(transport="streamable-http", host="0.0.0.0", port=8000)
 
 
 def test_warmup_models_loads_all_three():

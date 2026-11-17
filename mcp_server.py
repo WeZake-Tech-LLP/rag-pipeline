@@ -4,6 +4,7 @@ import os
 import threading
 
 from mcp.server.auth.provider import AccessToken
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 
 # `ingest`/`query` are imported lazily, inside each function, rather than
@@ -66,7 +67,20 @@ def warmup_models() -> None:
     ingest_get_collection()
 
 
-server = MCPServer("rag-knowledge-base")
+server = MCPServer(
+    "rag-knowledge-base",
+    auth=AuthSettings(
+        issuer_url=get_mcp_public_url(),
+        resource_server_url=get_mcp_public_url(),
+        # SharedTokenVerifier owns the whole validity decision itself and
+        # never sets AccessToken.resource — leaving this unset would start
+        # rejecting every token once the SDK's documented future default
+        # (True) lands, since a token with no resource can't match
+        # resource_server_url.
+        validate_token_resource=False,
+    ),
+    token_verifier=SharedTokenVerifier(),
+)
 
 
 @server.tool()
@@ -94,12 +108,13 @@ def add_to_knowledge_base(url: str) -> str:
 
 def main() -> None:
     pin_working_directory()
+    get_mcp_shared_token()  # fail fast if misconfigured, before starting the server
     # Run in the background: warmup takes ~30s (torch/transformers/
     # reranker/Groq client), and if server.run() waited for it, the
     # MCP client's connection handshake would time out before the
     # server even started listening.
     threading.Thread(target=warmup_models, daemon=True).start()
-    server.run()
+    server.run(transport="streamable-http", host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":

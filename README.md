@@ -209,6 +209,56 @@ and the bot behaves exactly as it does today.
 
 ---
 
+## MCP Server (connect Claude Code directly)
+
+`mcp_server.py` exposes this same knowledge base to Claude Code as two
+tools — `search_knowledge_base` and `add_to_knowledge_base` — over the
+network, instead of the old stdio-only setup. That means one running
+copy can serve Claude Code on this machine *and* anyone else's, once
+they have the URL and the shared token below.
+
+### 1. Set the shared secret
+
+```env
+MCP_SHARED_TOKEN=pick_a_long_random_secret_here
+```
+
+Optionally also set `MCP_PUBLIC_URL` to whatever address this server
+will actually be reachable at (defaults to `http://localhost:8000`,
+which is only useful for testing on the same machine).
+
+### 2. Run it
+
+```bash
+source .venv/bin/activate
+python mcp_server.py
+```
+
+It listens on `0.0.0.0:8000` and checks every request's
+`Authorization: Bearer <token>` header against `MCP_SHARED_TOKEN`
+— no token, or the wrong one, gets a `401`.
+
+### 3. Connect Claude Code to it
+
+```bash
+claude mcp add --transport http rag-knowledge-base <MCP_PUBLIC_URL>/mcp -H "Authorization: Bearer <your_token>"
+```
+
+Share the URL and token with anyone else you want to have the same
+access — same spirit as the Telegram invite link, no install needed on
+their end.
+
+**Two things worth knowing:**
+- This only covers the server code. Actually putting it somewhere
+  always-on (a cloud VM, for example) is a separate, manual deployment
+  step this change doesn't do by itself.
+- This is plain HTTP, not HTTPS — the token travels unencrypted over
+  the network. That matches this project's current "demo, not
+  hardened" security posture; revisit before using this for anything
+  sensitive.
+
+---
+
 ## Project Layout
 
 ```
