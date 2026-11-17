@@ -219,6 +219,15 @@ def test_resolve_redirector_decodes_facebook_link_wrapper():
     assert _resolve_redirector(wrapped) == "https://github.com/real/repo"
 
 
+def test_resolve_redirector_does_not_double_decode_facebook_wrapper():
+    # parse_qs already percent-decodes the query value once; a second
+    # unquote() wrongly decodes an already-correct %26 (a literal "&"
+    # inside the real URL's own query string) into a bare "&", which
+    # changes how the resulting URL's query string parses.
+    wrapped = "https://l.facebook.com/l.php?u=https%3A%2F%2Fgithub.com%2Fa%2Fb%3Fq%3Dx%2526y&h=abc"
+    assert _resolve_redirector(wrapped) == "https://github.com/a/b?q=x%26y"
+
+
 def test_resolve_redirector_decodes_instagram_link_wrapper():
     wrapped = "https://l.instagram.com/?u=https%3A%2F%2Fgithub.com%2Freal%2Frepo&e=abc"
     assert _resolve_redirector(wrapped) == "https://github.com/real/repo"
@@ -266,6 +275,31 @@ def test_find_platform_urls_follows_short_link_resolving_to_different_platform()
         text = "https://lnkd.in/abc123"
         result = _find_platform_urls(text, exclude_hosts=frozenset({"linkedin.com", "lnkd.in"}))
     assert result == ["https://github.com/real/repo"]
+
+
+def test_find_platform_urls_caches_duplicate_wrapper_resolutions():
+    fake_response = MagicMock()
+    fake_response.url = "https://github.com/real/repo"
+    fake_response.close = MagicMock()
+    with patch("ingest.requests.get", return_value=fake_response) as mock_get:
+        text = "https://t.co/abc123 https://t.co/abc123 https://t.co/abc123"
+        result = _find_platform_urls(text)
+    assert mock_get.call_count == 1
+    assert result == ["https://github.com/real/repo"]
+
+
+def test_find_platform_urls_caps_total_wrapper_resolution_attempts():
+    responses = []
+    for i in range(20):
+        r = MagicMock()
+        r.url = f"https://example.com/{i}"
+        r.close = MagicMock()
+        responses.append(r)
+    with patch("ingest.requests.get", side_effect=responses) as mock_get:
+        text = " ".join(f"https://t.co/link{i}" for i in range(20))
+        result = _find_platform_urls(text)
+    assert mock_get.call_count <= 8
+    assert result == []
 
 
 def test_extract_via_jina_or_meta_applies_link_following_on_meta_fallback():
@@ -495,3 +529,24 @@ def test_extract_reddit_follows_link_found_only_in_a_comment():
         text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
     mock_fetch.assert_called_once_with("https://github.com/real/repo")
     assert "Flask README text" in text
+
+
+def test_extract_reddit_excludes_short_link_resolving_to_another_reddit_post():
+    # Old _find_external_url only ever excluded a URL whose literal
+    # string already contained "reddit.com"/"redd.it" — a wrapped link
+    # (e.g. a t.co/lnkd.in short link) that only resolves to a reddit.com
+    # destination would have slipped past that check entirely.
+    xml = _REDDIT_ATOM_XML.replace(
+        "https://github.com/real/repo", "https://t.co/xyz789"
+    )
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=xml.encode())
+    tco_resolve_response = MagicMock()
+    tco_resolve_response.url = "https://www.reddit.com/r/test/comments/other/post"
+    tco_resolve_response.close = MagicMock()
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response, tco_resolve_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    mock_fetch.assert_not_called()

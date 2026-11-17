@@ -431,7 +431,7 @@ _REDIRECTOR_QUERY_PARAM_HOSTS = frozenset({"l.facebook.com", "l.instagram.com"})
 
 
 def _resolve_redirector(url: str) -> str:
-    from urllib.parse import urlsplit, parse_qs, unquote
+    from urllib.parse import urlsplit, parse_qs
 
     parts = urlsplit(url)
     host = parts.netloc.lower()
@@ -439,7 +439,7 @@ def _resolve_redirector(url: str) -> str:
 
     if normalized in _REDIRECTOR_QUERY_PARAM_HOSTS:
         target = parse_qs(parts.query).get("u", [None])[0]
-        return unquote(target) if target else url
+        return target if target else url
 
     if normalized in _REDIRECTOR_NETWORK_HOSTS:
         try:
@@ -470,14 +470,31 @@ def _is_platform_host(host: str) -> bool:
     return any(host == domain or host.endswith("." + domain) for domain in _PLATFORM_HOSTS)
 
 
+_MAX_REDIRECTOR_RESOLUTIONS = 8
+
+
 def _find_platform_urls(text: str, max_links: int = 4, exclude_hosts: frozenset = frozenset()) -> List[str]:
     from urllib.parse import urlsplit
 
     stripped = _strip_image_markdown(text)
     found = []
+    resolved_cache = {}
+    network_resolutions = 0
     for match in re.finditer(r'https?://[^\s)\]*<"\']+', stripped):
-        candidate = match.group(0).rstrip(").,;:!?\"'][}{")
-        candidate = _resolve_redirector(candidate)
+        raw_candidate = match.group(0).rstrip(").,;:!?\"'][}{")
+
+        if raw_candidate in resolved_cache:
+            candidate = resolved_cache[raw_candidate]
+        else:
+            raw_host = urlsplit(raw_candidate).netloc.lower()
+            raw_normalized = raw_host[4:] if raw_host.startswith("www.") else raw_host
+            if raw_normalized in _REDIRECTOR_NETWORK_HOSTS:
+                if network_resolutions >= _MAX_REDIRECTOR_RESOLUTIONS:
+                    continue
+                network_resolutions += 1
+            candidate = _resolve_redirector(raw_candidate)
+            resolved_cache[raw_candidate] = candidate
+
         if candidate in found:
             continue
         if any(marker in candidate.lower() for marker in _SHARE_PATH_MARKERS):
