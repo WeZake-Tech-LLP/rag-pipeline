@@ -442,7 +442,10 @@ _PLATFORM_LABEL_HOSTS = {
     "Instagram": frozenset({"instagram.com"}),
     "X": frozenset({"x.com", "twitter.com"}),
     "Reddit": frozenset({"reddit.com", "redd.it"}),
-    "GitHub": frozenset({"github.com"}),
+    # pypi.org/npmjs.com/opensource.org are excluded for GitHub specifically
+    # (common badge targets in a README) — not globally, since on other
+    # platforms a registry link is usually the actual package announcement.
+    "GitHub": frozenset({"github.com", "pypi.org", "npmjs.com", "opensource.org"}),
     "YouTube": frozenset({"youtube.com", "youtu.be"}),
 }
 
@@ -512,21 +515,27 @@ def _resolve_redirector(url: str) -> str:
 
 _SHARE_PATH_MARKERS = ("/intent/", "/share", "sharer", "sharearticle", "/submit")
 
-# Hosts that are never the actual content a post is pointing to, so they're
-# excluded regardless of allow_any_host — badge/CI/registry targets (what a
-# README badge links to), image/CDN hosts, and sponsor/community links.
+# Hosts that are never real content anywhere they're embedded — CI/badge
+# icon targets, image/CDN hosts, and sponsor/community links — so they're
+# excluded regardless of allow_any_host. Package-registry hosts (pypi.org,
+# npmjs.com, opensource.org) are deliberately NOT here: they're only noise
+# as a GitHub README badge target (see _PLATFORM_LABEL_HOSTS["GitHub"]) —
+# shared on X/Reddit/etc. they're usually the actual announcement. Likewise
+# discord.com itself (unlike the discord.gg invite-shortlink domain) hosts
+# real pages (blog posts, docs), so it's not treated as noise.
 _NOISE_HOSTS = frozenset({
     "shields.io", "badge.fury.io", "codecov.io", "coveralls.io",
     "travis-ci.org", "travis-ci.com", "circleci.com",
-    "pypi.org", "npmjs.com", "opensource.org",
     "githubusercontent.com",
     "patreon.com", "ko-fi.com", "buymeacoffee.com",
-    "discord.gg", "discord.com", "linktr.ee",
+    "discord.gg", "linktr.ee",
 })
 
 # A bare profile link (one path segment, e.g. twitter.com/someone) is never
 # the post's actual subject — unlike a post/status link (multiple segments),
-# which is real content.
+# which is real content. A query string is excluded from this check since
+# some platforms' real content links carry the ID there instead of in the
+# path (e.g. facebook.com/watch/?v=... or permalink.php?story_fbid=...).
 _BARE_PROFILE_HOSTS = frozenset({"twitter.com", "x.com", "instagram.com", "facebook.com", "fb.com"})
 
 
@@ -535,9 +544,11 @@ def _is_noise_host(host: str) -> bool:
     return any(normalized == d or normalized.endswith("." + d) for d in _NOISE_HOSTS)
 
 
-def _is_bare_profile_link(host: str, path: str) -> bool:
+def _is_bare_profile_link(host: str, path: str, query: str = "") -> bool:
     normalized = host[4:] if host.startswith("www.") else host
     if not any(normalized == d or normalized.endswith("." + d) for d in _BARE_PROFILE_HOSTS):
+        return False
+    if query:
         return False
     segment = path.strip("/")
     return bool(segment) and "/" not in segment
@@ -596,7 +607,7 @@ def _find_platform_urls(
         # this is excluded regardless of allow_any_host.
         if normalized_host in _REDIRECTOR_NETWORK_HOSTS:
             continue
-        if _is_noise_host(host) or _is_bare_profile_link(host, candidate_parts.path):
+        if _is_noise_host(host) or _is_bare_profile_link(host, candidate_parts.path, candidate_parts.query):
             continue
         if not allow_any_host and not _is_platform_host(host):
             continue
@@ -656,19 +667,20 @@ def extract_reddit(url: str, follow_links: bool = True):
         post_author_el = post_entry.find("atom:author/atom:name", ATOM_NS)
         post_author = post_author_el.text.strip() if post_author_el is not None and post_author_el.text else ""
         post_content_el = post_entry.find("atom:content", ATOM_NS)
-        post_text, href_urls = _clean_html(post_content_el.text if post_content_el is not None else "")
+        post_text, post_href_urls = _clean_html(post_content_el.text if post_content_el is not None else "")
 
         parts = [f"Title: {feed_title}", f"Author: {post_author}"]
         if post_text:
             parts.append(f"Post:\n{post_text}")
 
         comment_lines = []
+        comment_href_urls = []
         for entry in entries[1:16]:
             author_el = entry.find("atom:author/atom:name", ATOM_NS)
             author = author_el.text.strip() if author_el is not None and author_el.text else "unknown"
             content_el = entry.find("atom:content", ATOM_NS)
             body, comment_hrefs = _clean_html(content_el.text if content_el is not None else "")
-            href_urls.extend(comment_hrefs)
+            comment_href_urls.extend(comment_hrefs)
             if not body:
                 continue
             comment_lines.append(f"- {author}: {body}")
@@ -679,9 +691,15 @@ def extract_reddit(url: str, follow_links: bool = True):
         text = "\n\n".join(parts).strip()
         if len(text) > 50:
             if follow_links:
+                # The post's own hyperlinked target (priority_scan_text) must
+                # outrank comment links (extra_scan_text) — it's the reason
+                # the post exists, and must not lose its slot in the
+                # max_links cap to a handful of comments that happen to
+                # paste a bare URL.
                 text = _append_linked_content(
                     text,
-                    extra_scan_text=" ".join(href_urls),
+                    priority_scan_text=" ".join(post_href_urls),
+                    extra_scan_text=" ".join(comment_href_urls),
                     exclude_hosts=_PLATFORM_LABEL_HOSTS.get("Reddit", frozenset()),
                     allow_any_host=True,
                 )
@@ -779,14 +797,19 @@ def _append_linked_content(
     text: str,
     max_links: int = 4,
     extra_scan_text: str = "",
+    priority_scan_text: str = "",
     exclude_hosts: frozenset = frozenset(),
     allow_any_host: bool = False,
 ) -> str:
-    # extra_scan_text lets a caller feed in links that don't appear as
-    # bare URLs in `text` itself (e.g. <a href> targets BeautifulSoup's
-    # get_text() already discarded) without those raw URLs polluting the
-    # stored/returned content.
-    scan_text = f"{text} {extra_scan_text}" if extra_scan_text else text
+    # extra_scan_text/priority_scan_text let a caller feed in links that
+    # don't appear as bare URLs in `text` itself (e.g. <a href> targets
+    # BeautifulSoup's get_text() already discarded) without those raw
+    # URLs polluting the stored/returned content. Candidates are scanned
+    # in the order priority_scan_text, then text, then extra_scan_text —
+    # priority_scan_text exists so a caller can rank "the subject itself"
+    # (e.g. a Reddit link-post's own target) ahead of secondary content
+    # (e.g. comments) that might otherwise fill the max_links cap first.
+    scan_text = " ".join(part for part in (priority_scan_text, text, extra_scan_text) if part)
     result = text
     for url in _find_platform_urls(
         scan_text, max_links=max_links, exclude_hosts=exclude_hosts, allow_any_host=allow_any_host

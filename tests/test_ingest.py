@@ -970,3 +970,87 @@ def test_extract_linkedin_follows_link_reached_through_safety_go_interstitial():
         text, quality, error = extract_linkedin("https://www.linkedin.com/posts/my-post_456")
     mock_fetch.assert_called_once_with("https://nytimes.com/2026/article")
     assert "Article text" in text
+
+
+_REDDIT_ATOM_XML_HREF_POST_PLUS_COMMENT_LINKS = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Post Title</title>
+  <entry>
+    <author><name>poster</name></author>
+    <content type="html">Check out &lt;a href="https://www.theverge.com/2026/the-actual-article"&gt;this&lt;/a&gt;.</content>
+  </entry>
+  <entry>
+    <author><name>c0</name></author>
+    <content type="html">https://site0.com/p</content>
+  </entry>
+  <entry>
+    <author><name>c1</name></author>
+    <content type="html">https://site1.com/p</content>
+  </entry>
+  <entry>
+    <author><name>c2</name></author>
+    <content type="html">https://site2.com/p</content>
+  </entry>
+  <entry>
+    <author><name>c3</name></author>
+    <content type="html">https://site3.com/p</content>
+  </entry>
+</feed>"""
+
+
+def test_extract_reddit_hyperlinked_post_link_outranks_comment_links():
+    # The post's own target is the whole reason someone shared the post —
+    # it must not get crowded out of the 4-link cap by comment links that
+    # merely happen to appear as bare, already-visible URLs.
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(
+        status_code=200, content=_REDDIT_ATOM_XML_HREF_POST_PLUS_COMMENT_LINKS.encode()
+    )
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content", return_value="content") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    fetched_urls = [call.args[0] for call in mock_fetch.call_args_list]
+    assert "https://www.theverge.com/2026/the-actual-article" in fetched_urls
+
+
+def test_find_platform_urls_allows_facebook_watch_link_with_query_string():
+    # facebook.com/watch/?v=... and permalink.php?story_fbid=... carry the
+    # real content ID in the query string, with only one path segment —
+    # they must not be mistaken for a bare profile link.
+    result = _find_platform_urls("https://www.facebook.com/watch/?v=12345")
+    assert result == ["https://www.facebook.com/watch/?v=12345"]
+
+
+def test_find_platform_urls_allows_facebook_permalink_with_query_string():
+    result = _find_platform_urls("https://www.facebook.com/permalink.php?story_fbid=1&id=2")
+    assert result == ["https://www.facebook.com/permalink.php?story_fbid=1&id=2"]
+
+
+def test_find_platform_urls_still_excludes_bare_profile_link_without_query():
+    result = _find_platform_urls("https://twitter.com/mychannel", allow_any_host=True)
+    assert result == []
+
+
+def test_find_platform_urls_still_follows_pypi_announcement_outside_github():
+    # The registry-host exclusion exists for GitHub badge noise and must
+    # not silently drop a package announcement shared on X/Reddit/etc.
+    text = "I just released my package: https://pypi.org/project/foo/"
+    result = _find_platform_urls(text, allow_any_host=True)
+    assert result == ["https://pypi.org/project/foo/"]
+
+
+def test_find_platform_urls_still_follows_discord_blog_post_outside_github():
+    text = "Discord wrote about this: https://discord.com/blog/how-discord-stores-trillions-of-messages"
+    result = _find_platform_urls(text, allow_any_host=True)
+    assert result == ["https://discord.com/blog/how-discord-stores-trillions-of-messages"]
+
+
+def test_extract_github_still_excludes_registry_links_in_readme():
+    readme = "PyPI: https://pypi.org/project/foo/ npm: https://www.npmjs.com/package/foo"
+    repo_response, readme_response = _github_responses(readme)
+    with patch("ingest.requests.get", side_effect=[repo_response, readme_response]), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_github("https://github.com/real/repo")
+    mock_fetch.assert_not_called()
