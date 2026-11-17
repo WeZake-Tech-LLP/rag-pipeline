@@ -8,6 +8,7 @@ from ingest import (
     extract_facebook,
     extract_instagram,
     _fetch_linked_content,
+    _resolve_redirector,
 )
 
 
@@ -163,12 +164,6 @@ def test_find_platform_urls_exclude_hosts_matches_www_subdomain():
     assert result == ["https://github.com/real/repo"]
 
 
-def test_find_platform_urls_excludes_short_link_form():
-    text = "https://lnkd.in/abc123 https://github.com/real/repo"
-    result = _find_platform_urls(text, exclude_hosts=frozenset({"linkedin.com", "lnkd.in"}))
-    assert result == ["https://github.com/real/repo"]
-
-
 def test_append_linked_content_passes_exclude_hosts_through():
     text = "See https://www.linkedin.com/posts/other-person_123 and https://github.com/real/repo"
     with patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
@@ -211,6 +206,64 @@ def test_extract_instagram_excludes_links_to_other_instagram_posts():
         text, quality, error = extract_instagram("https://www.instagram.com/p/my456/")
     mock_fetch.assert_called_once_with("https://github.com/real/repo")
     assert "Flask README text" in text
+
+
+def test_resolve_redirector_returns_unchanged_for_non_redirector_host():
+    assert _resolve_redirector("https://github.com/real/repo") == "https://github.com/real/repo"
+
+
+def test_resolve_redirector_decodes_facebook_link_wrapper():
+    wrapped = "https://l.facebook.com/l.php?u=https%3A%2F%2Fgithub.com%2Freal%2Frepo&h=abc"
+    assert _resolve_redirector(wrapped) == "https://github.com/real/repo"
+
+
+def test_resolve_redirector_decodes_instagram_link_wrapper():
+    wrapped = "https://l.instagram.com/?u=https%3A%2F%2Fgithub.com%2Freal%2Frepo&e=abc"
+    assert _resolve_redirector(wrapped) == "https://github.com/real/repo"
+
+
+def test_resolve_redirector_follows_network_redirect_for_tco():
+    fake_response = MagicMock()
+    fake_response.url = "https://github.com/real/repo"
+    fake_response.close = MagicMock()
+    with patch("ingest.requests.get", return_value=fake_response) as mock_get:
+        result = _resolve_redirector("https://t.co/abc123")
+    mock_get.assert_called_once()
+    assert result == "https://github.com/real/repo"
+
+
+def test_resolve_redirector_degrades_safely_on_network_failure():
+    with patch("ingest.requests.get", side_effect=Exception("boom")):
+        result = _resolve_redirector("https://t.co/abc123")
+    assert result == "https://t.co/abc123"
+
+
+def test_find_platform_urls_does_not_call_network_for_non_wrapper_urls():
+    text = "https://github.com/real/repo https://www.youtube.com/watch?v=abc"
+    with patch("ingest.requests.get") as mock_get:
+        result = _find_platform_urls(text)
+    mock_get.assert_not_called()
+    assert result == ["https://github.com/real/repo", "https://www.youtube.com/watch?v=abc"]
+
+
+def test_find_platform_urls_excludes_short_link_resolving_to_same_platform():
+    fake_response = MagicMock()
+    fake_response.url = "https://www.linkedin.com/posts/other-person_123"
+    fake_response.close = MagicMock()
+    with patch("ingest.requests.get", return_value=fake_response):
+        text = "https://lnkd.in/abc123 https://github.com/real/repo"
+        result = _find_platform_urls(text, exclude_hosts=frozenset({"linkedin.com", "lnkd.in"}))
+    assert result == ["https://github.com/real/repo"]
+
+
+def test_find_platform_urls_follows_short_link_resolving_to_different_platform():
+    fake_response = MagicMock()
+    fake_response.url = "https://github.com/real/repo"
+    fake_response.close = MagicMock()
+    with patch("ingest.requests.get", return_value=fake_response):
+        text = "https://lnkd.in/abc123"
+        result = _find_platform_urls(text, exclude_hosts=frozenset({"linkedin.com", "lnkd.in"}))
+    assert result == ["https://github.com/real/repo"]
 
 
 def test_extract_via_jina_or_meta_applies_link_following_on_meta_fallback():

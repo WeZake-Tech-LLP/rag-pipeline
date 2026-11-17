@@ -454,7 +454,38 @@ _PLATFORM_LABEL_HOSTS = {
     "LinkedIn": frozenset({"linkedin.com", "lnkd.in"}),
     "Facebook": frozenset({"facebook.com", "fb.com"}),
     "Instagram": frozenset({"instagram.com"}),
+    "X": frozenset({"x.com", "twitter.com"}),
+    "Reddit": frozenset({"reddit.com", "redd.it"}),
 }
+
+_REDIRECTOR_NETWORK_HOSTS = frozenset({"t.co", "lnkd.in"})
+_REDIRECTOR_QUERY_PARAM_HOSTS = frozenset({"l.facebook.com", "l.instagram.com"})
+
+
+def _resolve_redirector(url: str) -> str:
+    from urllib.parse import urlsplit, parse_qs, unquote
+
+    parts = urlsplit(url)
+    host = parts.netloc.lower()
+    normalized = host[4:] if host.startswith("www.") else host
+
+    if normalized in _REDIRECTOR_QUERY_PARAM_HOSTS:
+        target = parse_qs(parts.query).get("u", [None])[0]
+        return unquote(target) if target else url
+
+    if normalized in _REDIRECTOR_NETWORK_HOSTS:
+        try:
+            response = requests.get(
+                url, timeout=10, headers={"User-Agent": "Mozilla/5.0"},
+                allow_redirects=True, stream=True,
+            )
+            resolved = response.url
+            response.close()
+            return resolved if resolved and resolved != url else url
+        except Exception:
+            return url
+
+    return url
 
 _SHARE_PATH_MARKERS = ("/intent/", "/share", "sharer", "sharearticle", "/submit")
 
@@ -478,6 +509,7 @@ def _find_platform_urls(text: str, max_links: int = 4, exclude_hosts: frozenset 
     found = []
     for match in re.finditer(r'https?://[^\s)\]*<"\']+', stripped):
         candidate = match.group(0).rstrip(").,;:!?\"'][}{")
+        candidate = _resolve_redirector(candidate)
         if candidate in found:
             continue
         if any(marker in candidate.lower() for marker in _SHARE_PATH_MARKERS):
