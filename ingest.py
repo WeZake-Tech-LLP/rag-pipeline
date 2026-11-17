@@ -408,14 +408,6 @@ def extract_x(url: str, follow_links: bool = True):
     return text.strip(), "full_text", None
 
 
-def _find_external_url(text: str) -> Optional[str]:
-    for match in re.finditer(r"https?://\S+", text):
-        candidate = match.group(0).rstrip(").,;:!?\"'][}{")
-        if "reddit.com" not in candidate and "redd.it" not in candidate:
-            return candidate
-    return None
-
-
 _PLATFORM_HOSTS = {
     "youtube.com", "youtu.be",
     "linkedin.com", "lnkd.in",
@@ -553,13 +545,6 @@ def extract_reddit(url: str, follow_links: bool = True):
         if post_text:
             parts.append(f"Post:\n{post_text}")
 
-        if follow_links and post_text:
-            external_url = _find_external_url(post_text)
-            if external_url:
-                linked_text = _fetch_linked_content(external_url)
-                if linked_text:
-                    parts.append(f"Linked Content:\n{linked_text}")
-
         comment_lines = []
         for entry in entries[1:16]:
             author_el = entry.find("atom:author/atom:name", ATOM_NS)
@@ -575,6 +560,8 @@ def extract_reddit(url: str, follow_links: bool = True):
 
         text = "\n\n".join(parts).strip()
         if len(text) > 50:
+            if follow_links:
+                text = _append_linked_content(text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get("Reddit", frozenset()))
             return text, "reddit_rss", None
 
         return None, "failed", "Reddit post had no usable content"

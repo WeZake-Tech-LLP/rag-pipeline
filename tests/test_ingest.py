@@ -8,6 +8,7 @@ from ingest import (
     extract_facebook,
     extract_instagram,
     extract_x,
+    extract_reddit,
     _fetch_linked_content,
     _resolve_redirector,
 )
@@ -419,3 +420,78 @@ def test_extract_x_does_not_follow_links_when_follow_links_false():
          patch("ingest._fetch_linked_content") as mock_fetch:
         text, quality, error = extract_x("https://x.com/user/status/123", follow_links=False)
     mock_fetch.assert_not_called()
+
+
+_REDDIT_ATOM_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Post Title</title>
+  <entry>
+    <author><name>poster</name></author>
+    <content type="html">Check this out: https://github.com/real/repo</content>
+  </entry>
+</feed>"""
+
+
+def test_extract_reddit_follows_links_found_in_post_or_comments():
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=_REDDIT_ATOM_XML.encode())
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in text
+
+
+def test_extract_reddit_excludes_links_to_other_reddit_posts():
+    xml = _REDDIT_ATOM_XML.replace(
+        "https://github.com/real/repo", "https://www.reddit.com/r/test/comments/other/post"
+    )
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=xml.encode())
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    mock_fetch.assert_not_called()
+
+
+def test_extract_reddit_does_not_follow_links_when_follow_links_false():
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=_REDDIT_ATOM_XML.encode())
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content") as mock_fetch:
+        text, quality, error = extract_reddit(
+            "https://www.reddit.com/r/test/comments/abc/title", follow_links=False
+        )
+    mock_fetch.assert_not_called()
+
+
+_REDDIT_ATOM_XML_LINK_IN_COMMENT = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Post Title</title>
+  <entry>
+    <author><name>poster</name></author>
+    <content type="html">Just a plain post with no links.</content>
+  </entry>
+  <entry>
+    <author><name>commenter</name></author>
+    <content type="html">Check this out: https://github.com/real/repo</content>
+  </entry>
+</feed>"""
+
+
+def test_extract_reddit_follows_link_found_only_in_a_comment():
+    resolve_response = MagicMock()
+    resolve_response.url = "https://www.reddit.com/r/test/comments/abc/title"
+    rss_response = MagicMock(status_code=200, content=_REDDIT_ATOM_XML_LINK_IN_COMMENT.encode())
+    with patch("ingest.requests.get", side_effect=[resolve_response, rss_response]), \
+         patch("ingest._throttle_reddit_request"), \
+         patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        text, quality, error = extract_reddit("https://www.reddit.com/r/test/comments/abc/title")
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in text
