@@ -453,7 +453,7 @@ def _is_platform_host(host: str) -> bool:
     return any(host == domain or host.endswith("." + domain) for domain in _PLATFORM_HOSTS)
 
 
-def _find_platform_urls(text: str, max_links: int = 4) -> List[str]:
+def _find_platform_urls(text: str, max_links: int = 4, exclude_hosts: frozenset = frozenset()) -> List[str]:
     from urllib.parse import urlsplit
 
     stripped = _strip_image_markdown(text)
@@ -464,7 +464,11 @@ def _find_platform_urls(text: str, max_links: int = 4) -> List[str]:
             continue
         if any(marker in candidate.lower() for marker in _SHARE_PATH_MARKERS):
             continue
-        if not _is_platform_host(urlsplit(candidate).netloc):
+        host = urlsplit(candidate).netloc.lower()
+        normalized_host = host[4:] if host.startswith("www.") else host
+        if any(normalized_host == d or normalized_host.endswith("." + d) for d in exclude_hosts):
+            continue
+        if not _is_platform_host(host):
             continue
         found.append(candidate)
         if len(found) >= max_links:
@@ -631,14 +635,16 @@ def _extract_for_type(url: str, url_type: str, follow_links: bool = True):
     return text, quality, error, chunk_size, chunk_overlap
 
 
-def _append_linked_content(text: str, max_links: int = 4, extra_scan_text: str = "") -> str:
+def _append_linked_content(
+    text: str, max_links: int = 4, extra_scan_text: str = "", exclude_hosts: frozenset = frozenset()
+) -> str:
     # extra_scan_text lets a caller feed in links that don't appear as
     # bare URLs in `text` itself (e.g. <a href> targets BeautifulSoup's
     # get_text() already discarded) without those raw URLs polluting the
     # stored/returned content.
     scan_text = f"{text} {extra_scan_text}" if extra_scan_text else text
     result = text
-    for url in _find_platform_urls(scan_text, max_links=max_links):
+    for url in _find_platform_urls(scan_text, max_links=max_links, exclude_hosts=exclude_hosts):
         content = _fetch_linked_content(url)
         if content:
             result += f"\n\nLinked Content: {url}\n{content}"

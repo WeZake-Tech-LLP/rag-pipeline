@@ -142,6 +142,32 @@ def test_append_linked_content_adds_one_section_per_distinct_url():
     assert "A content" in result and "B content" in result
 
 
+def test_find_platform_urls_excludes_hosts_in_exclude_set():
+    text = "See https://www.linkedin.com/posts/other-person_123 and https://github.com/real/repo"
+    result = _find_platform_urls(text, exclude_hosts=frozenset({"linkedin.com"}))
+    assert result == ["https://github.com/real/repo"]
+
+
+def test_find_platform_urls_exclude_hosts_matches_www_subdomain():
+    text = "https://www.linkedin.com/feed/update/123 https://github.com/real/repo"
+    result = _find_platform_urls(text, exclude_hosts=frozenset({"linkedin.com"}))
+    assert result == ["https://github.com/real/repo"]
+
+
+def test_find_platform_urls_excludes_short_link_form():
+    text = "https://lnkd.in/abc123 https://github.com/real/repo"
+    result = _find_platform_urls(text, exclude_hosts=frozenset({"linkedin.com", "lnkd.in"}))
+    assert result == ["https://github.com/real/repo"]
+
+
+def test_append_linked_content_passes_exclude_hosts_through():
+    text = "See https://www.linkedin.com/posts/other-person_123 and https://github.com/real/repo"
+    with patch("ingest._fetch_linked_content", return_value="Flask README text") as mock_fetch:
+        result = _append_linked_content(text, exclude_hosts=frozenset({"linkedin.com"}))
+    mock_fetch.assert_called_once_with("https://github.com/real/repo")
+    assert "Flask README text" in result
+
+
 def test_extract_article_appends_linked_content_on_jina_success():
     jina_response = MagicMock(status_code=200, text="x" * 400)
     with patch("ingest.requests.get", return_value=jina_response), \
