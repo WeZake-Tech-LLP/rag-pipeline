@@ -350,7 +350,9 @@ def _extract_via_jina_or_meta(url: str, platform_label: str, follow_links: bool 
         if response.status_code == 200 and len(text) > 200 and not _is_jina_error_response(text):
             if follow_links:
                 text = _append_linked_content(
-                    text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())
+                    text,
+                    exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset()),
+                    allow_any_host=True,
                 )
             return text, "full_text", None
     except Exception:
@@ -371,7 +373,9 @@ def _extract_via_jina_or_meta(url: str, platform_label: str, follow_links: bool 
             text = text.strip()
             if follow_links:
                 text = _append_linked_content(
-                    text, exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset())
+                    text,
+                    exclude_hosts=_PLATFORM_LABEL_HOSTS.get(platform_label, frozenset()),
+                    allow_any_host=True,
                 )
             return text, "meta_only", None
     except Exception:

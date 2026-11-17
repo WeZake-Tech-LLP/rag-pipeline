@@ -341,6 +341,33 @@ def test_extract_via_jina_or_meta_applies_link_following_on_meta_fallback():
     assert quality == "meta_only"
 
 
+def test_extract_linkedin_follows_link_to_a_plain_article():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://www.nytimes.com/2026/article")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_linkedin("https://www.linkedin.com/posts/my-post_456")
+    mock_fetch.assert_called_once_with("https://www.nytimes.com/2026/article")
+    assert "Article text" in text
+
+
+def test_extract_facebook_follows_link_to_a_plain_article():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://www.theverge.com/2026/article")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_facebook("https://www.facebook.com/someone/posts/123")
+    mock_fetch.assert_called_once_with("https://www.theverge.com/2026/article")
+    assert "Article text" in text
+
+
+def test_extract_instagram_follows_link_to_a_plain_article():
+    jina_response = MagicMock(status_code=200, text="x" * 250 + " https://www.theverge.com/2026/article")
+    with patch("ingest.requests.get", return_value=jina_response), \
+         patch("ingest._fetch_linked_content", return_value="Article text") as mock_fetch:
+        text, quality, error = extract_instagram("https://www.instagram.com/p/my456/")
+    mock_fetch.assert_called_once_with("https://www.theverge.com/2026/article")
+    assert "Article text" in text
+
+
 def test_extract_article_does_not_follow_links_when_follow_links_false():
     jina_response = MagicMock(status_code=200, text="x" * 400 + " https://github.com/real/repo")
     with patch("ingest.requests.get", return_value=jina_response), \
