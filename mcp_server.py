@@ -43,6 +43,12 @@ def add_to_knowledge_base_impl(url: str) -> str:
     return format_ingest_reply(result)
 
 
+def remove_from_knowledge_base_impl(url: str) -> str:
+    from ingest import remove_source, format_remove_reply
+    result = remove_source(url)
+    return format_remove_reply(result)
+
+
 def get_mcp_shared_token() -> str:
     token = os.getenv("MCP_SHARED_TOKEN", "").strip()
     if not token:
@@ -119,6 +125,15 @@ def add_to_knowledge_base(url: str) -> str:
     a bare URL with no indication they want it stored.
     """
     return add_to_knowledge_base_impl(url)
+
+
+@server.tool()
+def remove_from_knowledge_base(url: str) -> str:
+    """Remove a previously ingested URL, and all its stored chunks, from
+    this personal RAG knowledge base. Use this when the user asks to
+    delete, remove, or forget a specific source — not for anything else.
+    """
+    return remove_from_knowledge_base_impl(url)
 
 
 def main() -> None:

@@ -8,6 +8,7 @@ from mcp_server import (
     pin_working_directory,
     warmup_models,
     add_to_knowledge_base_impl,
+    remove_from_knowledge_base_impl,
 )
 
 
@@ -217,3 +218,16 @@ def test_add_handles_failure():
     with patch("ingest.ingest_url", return_value={"success": False, "duplicate": False, "message": "Could not extract content: boom"}):
         result = add_to_knowledge_base_impl("https://example.com/post")
     assert "boom" in result
+
+
+def test_remove_passes_url_through_and_formats_success():
+    with patch("ingest.remove_source", return_value={"success": True, "message": "Removed source: https://example.com/post"}) as mock_remove:
+        result = remove_from_knowledge_base_impl("https://example.com/post")
+    mock_remove.assert_called_once_with("https://example.com/post")
+    assert "Removed source" in result
+
+
+def test_remove_handles_not_found():
+    with patch("ingest.remove_source", return_value={"success": False, "message": "URL not found in knowledge base"}):
+        result = remove_from_knowledge_base_impl("https://example.com/missing")
+    assert "not found" in result.lower()
