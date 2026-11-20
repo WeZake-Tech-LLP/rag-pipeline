@@ -88,8 +88,9 @@ with st.sidebar:
                 truncated = _truncate_url(source_url)
                 col_link, col_remove = st.columns([6, 1])
                 col_link.markdown(f"{icon} [{truncated}]({source_url})")
-                if col_remove.button("🗑️", key=f"remove_{source_url}", help="Remove this source"):
+                if col_remove.button("X", key=f"remove_{source_url}", help="Remove this source", use_container_width=True):
                     remove_source(source_url)
+                    st.toast(f"Removed {truncated}")
                     st.rerun()
     except Exception:
         st.caption("Could not load ingested sources.")
