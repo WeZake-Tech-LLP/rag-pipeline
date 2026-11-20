@@ -98,6 +98,7 @@ Your browser should open to the local URL Streamlit prints (typically `http://lo
 2. Wait for ingestion (first embed download may take a few minutes).
 3. Ask a question in the main area and click **Ask**.
 4. Use **Advanced Filters** if you want to scope retrieval by type (YouTube / LinkedIn / Article) or by exact URL.
+5. Click 🗑️ next to any source in the sidebar to remove it (and all its stored chunks) from the knowledge base.
 
 ---
 
@@ -211,11 +212,12 @@ and the bot behaves exactly as it does today.
 
 ## MCP Server (connect Claude Code directly)
 
-`mcp_server.py` exposes this same knowledge base to Claude Code as two
-tools — `search_knowledge_base` and `add_to_knowledge_base` — over the
-network, instead of the old stdio-only setup. That means one running
-copy can serve Claude Code on this machine *and* anyone else's, once
-they have the URL and the shared token below.
+`mcp_server.py` exposes this same knowledge base to Claude Code as three
+tools — `search_knowledge_base`, `add_to_knowledge_base`, and
+`remove_from_knowledge_base` — over the network, instead of the old
+stdio-only setup. That means one running copy can serve Claude Code on
+this machine *and* anyone else's, once they have the URL and the shared
+token below.
 
 ### 1. Set the shared secret
 
