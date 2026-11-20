@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 from ingest import (
     format_ingest_reply,
+    remove_source,
+    format_remove_reply,
     _find_platform_urls,
     _append_linked_content,
     extract_article,
@@ -33,6 +35,48 @@ def test_format_ingest_reply_duplicate():
 def test_format_ingest_reply_failure():
     result = {"success": False, "duplicate": False, "message": "Could not extract content: boom"}
     assert "boom" in format_ingest_reply(result)
+
+
+def test_format_remove_reply_success():
+    result = {"success": True, "message": "Removed source: https://example.com/post"}
+    reply = format_remove_reply(result)
+    assert "Removed source" in reply
+
+
+def test_format_remove_reply_failure():
+    result = {"success": False, "message": "URL not found in knowledge base"}
+    reply = format_remove_reply(result)
+    assert "not found" in reply.lower()
+
+
+def test_remove_source_deletes_matching_chunks():
+    mock_collection = MagicMock()
+    mock_collection.get.return_value = {"ids": ["id1", "id2"]}
+    with patch("ingest.get_collection", return_value=mock_collection):
+        result = remove_source("https://example.com/post")
+    mock_collection.delete.assert_called_once_with(where={"source": "https://example.com/post"})
+    assert result["success"] is True
+
+
+def test_remove_source_returns_not_found_when_absent():
+    mock_collection = MagicMock()
+    mock_collection.get.return_value = {"ids": []}
+    with patch("ingest.get_collection", return_value=mock_collection):
+        result = remove_source("https://example.com/missing")
+    mock_collection.delete.assert_not_called()
+    assert result["success"] is False
+
+
+def test_remove_source_normalizes_url_before_matching():
+    # A tracking-param variant of an already-ingested URL must still match
+    # the normalized form stored at ingest time (see _normalize_url) —
+    # otherwise removal silently matches zero rows.
+    mock_collection = MagicMock()
+    mock_collection.get.return_value = {"ids": ["id1"]}
+    with patch("ingest.get_collection", return_value=mock_collection):
+        remove_source("https://example.com/post/?utm_source=newsletter")
+    mock_collection.get.assert_called_once_with(where={"source": "https://example.com/post"}, limit=1)
+    mock_collection.delete.assert_called_once_with(where={"source": "https://example.com/post"})
 
 
 def test_find_platform_urls_filters_out_article_links():

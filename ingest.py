@@ -946,6 +946,24 @@ def format_ingest_reply(result: dict) -> str:
     return f"❌ Failed: {result.get('message', 'Ingestion failed.')}"
 
 
+def remove_source(url: str) -> dict:
+    url = _normalize_url(url)
+    collection = get_collection()
+
+    existing = collection.get(where={"source": url}, limit=1)
+    if not existing or not existing["ids"]:
+        return {"success": False, "message": "URL not found in knowledge base"}
+
+    collection.delete(where={"source": url})
+    return {"success": True, "message": f"Removed source: {url}"}
+
+
+def format_remove_reply(result: dict) -> str:
+    if result.get("success"):
+        return f"🗑️ {result.get('message', 'Removed.')}"
+    return f"❌ {result.get('message', 'Removal failed.')}"
+
+
 def list_ingested_sources() -> list:
     collection = get_collection()
     if collection.count() == 0:
