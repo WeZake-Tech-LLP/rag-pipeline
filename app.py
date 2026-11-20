@@ -7,7 +7,7 @@ from typing import Optional
 
 import streamlit as st
 
-from ingest import ingest_url, list_ingested_sources
+from ingest import ingest_url, list_ingested_sources, remove_source
 from query import knowledge_base_is_empty, query_knowledge_base
 
 
@@ -86,7 +86,11 @@ with st.sidebar:
                 source_url = src.get("source", "")
                 icon = _icon_for_type(source_type)
                 truncated = _truncate_url(source_url)
-                st.markdown(f"{icon} [{truncated}]({source_url})")
+                col_link, col_remove = st.columns([6, 1])
+                col_link.markdown(f"{icon} [{truncated}]({source_url})")
+                if col_remove.button("🗑️", key=f"remove_{source_url}", help="Remove this source"):
+                    remove_source(source_url)
+                    st.rerun()
     except Exception:
         st.caption("Could not load ingested sources.")
 
